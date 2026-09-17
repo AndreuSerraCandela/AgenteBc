@@ -1,0 +1,179 @@
+[
+  {
+    "id": "sales_invoice",
+    "label": "Factura de venta",
+    "page_id": 43,
+    "source_table": "Sales Header",
+    "odata_service": "salesDocuments",
+    "odata_key_field": "number",
+    "odata_select_fields": {
+      "system_id": "id",
+      "number": "number",
+      "document_type": "documentType",
+      "status": "status",
+      "posting_date": "postingDate"
+    },
+    "odata_filters": {
+      "documentType": "Invoice"
+    },
+    "page_filters": {
+      "Document Type": "Invoice"
+    },
+    "actions": [
+      {
+        "id": "preview_posting",
+        "label": "Vista previa de registro",
+        "safety": "diagnostic",
+        "menu_aria_label": "Acciones relacionadas para Registrar",
+        "action_aria_label": "Vista previa de registro",
+        "result_markers": [
+          "Mensajes de error",
+          "Vista previa de registro"
+        ],
+        "parse_error_rows": true,
+        "auto_confirm": false,
+        "confirmation_markers": [],
+        "confirmation_button": "Sí",
+        "dialog_steps": [],
+        "field_edits": []
+      },
+      {
+        "id": "registrar_factura",
+        "label": "Registrar",
+        "safety": "diagnostic",
+        "menu_aria_label": "Acciones relacionadas para Registrar",
+        "action_aria_label": "Registrar",
+        "result_markers": [
+          "Mensajes de error"
+        ],
+        "parse_error_rows": true,
+        "auto_confirm": true,
+        "confirmation_markers": [],
+        "confirmation_button": "Sí",
+        "dialog_steps": [
+          {
+            "markers": [
+              "¿Confirma que desea registrar la factura"
+            ],
+            "button": "Sí",
+            "selection": null
+          }
+        ],
+        "field_edits": []
+      }
+    ]
+  },
+  {
+    "id": "purchase_invoice",
+    "label": "Factura de compra",
+    "page_id": 51,
+    "source_table": "Purchase Header",
+    "odata_service": "purchaseDocuments",
+    "odata_key_field": "number",
+    "odata_select_fields": {
+      "system_id": "id",
+      "number": "number",
+      "document_type": "documentType",
+      "status": "status",
+      "posting_date": "postingDate"
+    },
+    "odata_filters": {
+      "documentType": "Invoice"
+    },
+    "page_filters": {
+      "Document Type": "Invoice"
+    },
+    "actions": [
+      {
+        "id": "preview_posting",
+        "label": "Vista previa de registro",
+        "safety": "diagnostic",
+        "menu_aria_label": "Acciones relacionadas para Registrar",
+        "action_aria_label": "Vista previa de registro",
+        "result_markers": [
+          "Mensajes de error",
+          "Vista previa de registro"
+        ],
+        "parse_error_rows": true,
+        "auto_confirm": false,
+        "confirmation_markers": [],
+        "confirmation_button": "Sí",
+        "dialog_steps": [],
+        "field_edits": []
+      }
+    ]
+  },
+  {
+    "id": "sales_contract",
+    "label": "Ficha Contrato Venta",
+    "page_id": 50209,
+    "source_table": "Sales Header",
+    "odata_service": "salesDocuments",
+    "odata_key_field": "number",
+    "odata_select_fields": {
+      "system_id": "id",
+      "number": "number",
+      "document_type": "documentType",
+      "status": "status",
+      "posting_date": "postingDate"
+    },
+    "odata_filters": {
+      "documentType": "Order"
+    },
+    "page_filters": {
+      "Document Type": "Order"
+    },
+    "actions": [
+      {
+        "id": "proponer_facturacion",
+        "label": "Proponer facturación contratos...",
+        "safety": "diagnostic",
+        "menu_aria_label": "Mostrar el resto",
+        "action_aria_label": "Proponer facturación contratos...",
+        "result_markers": [
+          "Mensajes de error"
+        ],
+        "parse_error_rows": true,
+        "auto_confirm": true,
+        "confirmation_markers": [],
+        "confirmation_button": "Sí",
+        "dialog_steps": [
+          {
+            "markers": [
+              "¿Desea crear los borradores de facturas"
+            ],
+            "button": "Sí",
+            "selection": null
+          },
+          {
+            "markers": [
+              "Por términos"
+            ],
+            "button": "Aceptar",
+            "selection": "Por términos"
+          }
+        ],
+        "field_edits": []
+      },
+      {
+        "id": "estado_firmado",
+        "label": "Cambiar estado a Firmado",
+        "safety": "interactive",
+        "menu_aria_label": null,
+        "action_aria_label": null,
+        "result_markers": [],
+        "parse_error_rows": false,
+        "auto_confirm": false,
+        "confirmation_markers": [],
+        "confirmation_button": "Sí",
+        "dialog_steps": [],
+        "field_edits": [
+          {
+            "field_label": "Estado",
+            "value": "Firmado"
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,105 @@
+Metadata-Version: 2.4
+Name: agente-bc
+Version: 0.1.0
+Summary: Asistente de diagnóstico de errores de Business Central on-premises
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: flask<4,>=3.1
+Requires-Dist: playwright<2,>=1.55
+Requires-Dist: requests<3,>=2.32
+Provides-Extra: sql
+Requires-Dist: pyodbc<6,>=5.2; extra == "sql"
+Provides-Extra: windows-auth
+Requires-Dist: requests-negotiate-sspi<1,>=0.5.2; extra == "windows-auth"
+Provides-Extra: dev
+Requires-Dist: pytest<9,>=8.3; extra == "dev"
+
+# Agente BC
+
+Asistente local para investigar errores de registro en Business Central
+on-premises. Su alcance es deliberadamente consultivo:
+
+- recopila el error y el contexto del documento;
+- consulta Business Central y SQL únicamente en lectura;
+- busca evidencias en el código fuente AL/C-AL;
+- genera un diagnóstico y soluciones propuestas;
+- deja cualquier decisión y modificación en manos del operario.
+
+No contiene herramientas para escribir en SQL, modificar Business Central ni
+registrar documentos.
+
+## Estado del MVP
+
+Esta primera versión permite:
+
+1. validar la configuración local;
+2. probar una consulta `GET` a OData/API;
+3. buscar el texto de un error en fuentes AL y exportaciones C/AL;
+4. generar un informe JSON con candidatos de código y recomendaciones.
+
+La captura automática del error desde el cliente Windows se añadirá después de
+identificar la versión exacta de NAV/Business Central y los controles que expone
+ese cliente.
+
+## Instalación
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+```
+
+Para SQL Server:
+
+```powershell
+python -m pip install -e ".[sql]"
+```
+
+Para autenticación integrada de Windows:
+
+```powershell
+python -m pip install -e ".[windows-auth]"
+```
+
+## Configuración
+
+Las credenciales no se guardan en el repositorio. La aplicación carga el
+fichero `.env` del directorio de trabajo, que está incluido en `.gitignore`.
+Puede partirse de `.env.example`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+En modo `basic`, el significado de usuario y contraseña depende de la versión y
+configuración de Business Central. No se presupone que la contraseña interactiva
+sirva como clave de servicio web.
+
+Puede reutilizarse un fichero SQL local que defina `SQL_SERVER`,
+`SQL_DATABASE`, `SQL_USER` y `SQL_PASSWORD`:
+
+```dotenv
+AGENTEBC_SQL_ENV_FILE=C:\Ruta\A\db.local.env
+```
+
+Aunque la aplicación rechaza instrucciones de escritura, el login SQL debe
+tener únicamente permisos `db_datareader`. La seguridad no debe depender solo
+del análisis de texto de una consulta.
+
+El entorno actual está preparado para Business Central 27 on-premises, instancia
+`POWERBI`, empresa `Malla Publicidad`, y fuentes en
+`C:\Users\Andres\Source\BC`. Solo faltan el usuario y la contraseña de BC en el
+`.env` local.
+
+## Uso
+
+```powershell
+agentebc check-config
+agentebc test-bc --endpoint "Company('CRONUS')/salesInvoices?$top=1"
+agentebc search-code --text "El proyecto es obligatorio"
+agentebc diagnose --error "El proyecto es obligatorio" --document "FV-1001"
+```
+
+Los comandos de conexión y diagnóstico solo ejecutan consultas. El comando
+`diagnose` aún no intenta registrar la factura: recibe el error observado y
+construye el expediente de diagnóstico.

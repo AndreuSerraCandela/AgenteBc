@@ -1,0 +1,133 @@
+# Agente BC
+
+Asistente local para investigar errores reportados en Business Central
+on-premises. Reproduce en el cliente web el flujo que describió el usuario,
+captura mensajes y pilas de llamadas, y construye un expediente de diagnóstico:
+
+- localiza el documento por OData;
+- ejecuta acciones configuradas (menús, diálogos y, en el futuro, cambios de campo);
+- consulta SQL solo en lectura como evidencia adicional;
+- busca candidatos en extensiones propias y en paquetes Microsoft (.alpackages);
+- propone verificaciones concretas para el operario.
+
+La automatización web puede modificar datos en Business Central cuando la acción
+reproducida lo exige (por ejemplo, proponer facturación o validar un campo).
+SQL sigue limitado a consultas de lectura.
+
+## Estado del MVP
+
+Esta primera versión permite:
+
+1. validar la configuración local;
+2. probar una consulta `GET` a OData/API;
+3. buscar el texto de un error en fuentes AL y exportaciones C/AL;
+4. generar un informe JSON con candidatos de código y recomendaciones.
+
+La captura automática del error desde el cliente Windows se añadirá después de
+identificar la versión exacta de NAV/Business Central y los controles que expone
+ese cliente.
+
+## Instalación
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+```
+
+Para SQL Server:
+
+```powershell
+python -m pip install -e ".[sql]"
+```
+
+Para autenticación integrada de Windows:
+
+```powershell
+python -m pip install -e ".[windows-auth]"
+```
+
+## Configuración
+
+Las credenciales no se guardan en el repositorio. La aplicación carga el
+fichero `.env` del directorio de trabajo, que está incluido en `.gitignore`.
+Puede partirse de `.env.example`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+En modo `basic`, el significado de usuario y contraseña depende de la versión y
+configuración de Business Central. No se presupone que la contraseña interactiva
+sirva como clave de servicio web.
+
+Puede reutilizarse un fichero SQL local que defina `SQL_SERVER`,
+`SQL_DATABASE`, `SQL_USER` y `SQL_PASSWORD`:
+
+```dotenv
+AGENTEBC_SQL_ENV_FILE=C:\Ruta\A\db.local.env
+```
+
+Aunque la aplicación rechaza instrucciones de escritura, el login SQL debe
+tener únicamente permisos `db_datareader`. La seguridad no debe depender solo
+del análisis de texto de una consulta.
+
+El entorno actual está preparado para Business Central 27 on-premises, instancia
+`POWERBI`, empresa `Malla Publicidad`, y fuentes en
+`C:\Users\Andres\Source\BC`. Solo faltan el usuario y la contraseña de BC en el
+`.env` local.
+
+## Uso
+
+```powershell
+agentebc check-config
+agentebc test-bc --endpoint "Company('CRONUS')/salesInvoices?$top=1"
+agentebc search-code --text "El proyecto es obligatorio"
+agentebc diagnose --error "El proyecto es obligatorio" --document "FV-1001"
+```
+
+Los comandos de conexión y el comando `diagnose` por CLI solo ejecutan consultas
+sobre el texto del error. La aplicación web, en cambio, puede reproducir acciones
+en Business Central antes de generar el informe.
+
+## Aplicación web local
+
+Arranque la aplicación desde el directorio del proyecto:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+agentebc-web
+```
+
+Abra `http://127.0.0.1:5000` y complete:
+
+1. empresa;
+2. factura de venta o compra;
+3. número del documento;
+4. confirmación de la vista previa.
+
+El botón **Ejecutar acción y diagnosticar** comprueba primero que el documento
+existe mediante OData. Después abre una sesión aislada del cliente web, ejecuta
+la acción configurada, recoge mensajes y pilas de llamadas, consulta evidencias
+SQL en solo lectura cuando aplica y muestra posibles soluciones.
+
+Las capturas se guardan en `reports/`, directorio excluido de Git. La aplicación
+solo escucha en `127.0.0.1`.
+
+### Tipos y acciones configurables
+
+La opción **Configurar tipos y acciones** permite definir otras fichas de
+Business Central sin cambiar Python. La configuración se guarda en
+`config/document_types.json` e incluye:
+
+- Page ID y SourceTable;
+- servicio y campo clave OData;
+- filtros fijos de OData y de la página;
+- acciones, selectores accesibles y textos de resultado;
+- clasificación `blocked`, `read_only`, `interactive` o `diagnostic`.
+
+La aplicación incluye inicialmente facturas de venta, facturas de compra y
+**Ficha Contrato Venta** (page 50209). En una ficha sin acciones configuradas,
+el botón **Explorar acciones sin ejecutarlas** abre el registro y enumera las
+acciones visibles. Una acción descubierta queda bloqueada hasta que un operario
+revise su comportamiento y la clasifique.

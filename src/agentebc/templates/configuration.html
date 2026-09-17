@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configuración · Agente BC</title>
+  <style>
+    body {
+      background:#f5f5f5; color:#242424; font-family:"Segoe UI",sans-serif;
+      margin:0;
+    }
+    header { background:#272727; color:white; padding:18px max(24px,calc((100% - 1100px)/2)); }
+    header h1 { margin:0 0 5px; font-size:22px; }
+    header a { color:#8cc8ff; }
+    main { max-width:1100px; margin:24px auto; padding:0 24px 48px; }
+    section {
+      background:white; border:1px solid #ddd; border-radius:6px;
+      margin-bottom:18px; padding:22px;
+    }
+    h2 { margin-top:0; }
+    .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+    .wide { grid-column:1/-1; }
+    label { display:block; font-weight:600; margin-bottom:5px; }
+    input,select,textarea {
+      box-sizing:border-box; font:inherit; padding:8px 10px; width:100%;
+    }
+    textarea { min-height:95px; font-family:Consolas,monospace; }
+    button,.button {
+      background:#0067b8; border:0; border-radius:3px; color:white;
+      cursor:pointer; display:inline-block; font-weight:600; padding:9px 16px;
+      text-decoration:none;
+    }
+    .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+    .card { border:1px solid #ddd; border-radius:4px; padding:14px; }
+    .card h3 { margin-top:0; }
+    .error { background:#fde7e9; border-left:5px solid #a80000; padding:12px; }
+    .success { background:#dff6dd; border-left:5px solid #107c10; padding:12px; }
+    .notice { color:#555; font-size:14px; }
+    .subsection {
+      background:#f8fbff; border:1px solid #c7dff7; border-radius:4px;
+      grid-column:1/-1; margin-top:4px; padding:14px;
+    }
+    .subsection h3 { margin:0 0 8px; font-size:16px; }
+    code { background:#f3f3f3; padding:2px 4px; }
+    @media(max-width:800px) {
+      .grid,.cards { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Configuración de tipos y acciones</h1>
+    <a href="/">Volver al diagnóstico</a>
+  </header>
+  <main>
+    {% if saved %}<p class="success">Configuración guardada.</p>{% endif %}
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+    <section>
+      <h2>Tipos configurados</h2>
+      <div class="cards">
+        {% for type in document_types %}
+          <article class="card">
+            <h3>{{ type.label }}</h3>
+            <p>
+              <code>{{ type.id }}</code><br>
+              Página {{ type.page_id }} · {{ type.source_table }}<br>
+              OData: {{ type.odata_service }}
+            </p>
+            <p>{{ type.actions|length }} acción(es) configurada(s)</p>
+            <a class="button" href="/configuration?type_id={{ type.id }}">Editar</a>
+            {% for action in type.actions %}
+              <p>
+                {{ action.label }} · <strong>{{ action.safety }}</strong>
+                {% if action.auto_confirm %}
+                  · confirmación automática
+                {% endif %}
+                <a href="/configuration?type_id={{ type.id }}&action_id={{ action.id }}">
+                  editar
+                </a>
+              </p>
+            {% endfor %}
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+
+    <section>
+      <h2>{{ "Editar" if editing_type else "Nuevo" }} tipo de ficha</h2>
+      <form method="post" action="/configuration/document-type">
+        <div class="grid">
+          <div>
+            <label for="id">ID interno</label>
+            <input id="id" name="id" required pattern="[a-z][a-z0-9_-]{1,49}"
+                   value="{{ editing_type.id if editing_type else '' }}"
+                   {% if editing_type %}readonly{% endif %}>
+          </div>
+          <div>
+            <label for="label">Nombre mostrado</label>
+            <input id="label" name="label" required
+                   value="{{ editing_type.label if editing_type else '' }}">
+          </div>
+          <div>
+            <label for="page_id">Page ID</label>
+            <input id="page_id" name="page_id" type="number" min="1" required
+                   value="{{ editing_type.page_id if editing_type else '' }}">
+          </div>
+          <div>
+            <label for="source_table">SourceTable</label>
+            <input id="source_table" name="source_table" required
+                   value="{{ editing_type.source_table if editing_type else '' }}"
+                   placeholder="Sales Header">
+          </div>
+          <div>
+            <label for="odata_service">Servicio OData</label>
+            <input id="odata_service" name="odata_service" required
+                   value="{{ editing_type.odata_service if editing_type else '' }}"
+                   placeholder="salesDocuments">
+          </div>
+          <div>
+            <label for="odata_key_field">Campo clave OData</label>
+            <input id="odata_key_field" name="odata_key_field" required
+                   value="{{ editing_type.odata_key_field if editing_type else '' }}"
+                   placeholder="number">
+          </div>
+          <div>
+            <label for="odata_select_fields">Correspondencia de campos</label>
+            <textarea id="odata_select_fields" name="odata_select_fields">{% if editing_type %}{% for key,value in editing_type.odata_select_fields.items() %}{{ key }}={{ value }}
+{% endfor %}{% else %}system_id=id
+number=number
+document_type=documentType
+status=status
+posting_date=postingDate{% endif %}</textarea>
+          </div>
+          <div>
+            <label for="odata_filters">Filtros OData fijos</label>
+            <textarea id="odata_filters" name="odata_filters">{% if editing_type %}{% for key,value in editing_type.odata_filters.items() %}{{ key }}={{ value }}
+{% endfor %}{% endif %}</textarea>
+          </div>
+          <div>
+            <label for="page_filters">Filtros de página fijos</label>
+            <textarea id="page_filters" name="page_filters">{% if editing_type %}{% for key,value in editing_type.page_filters.items() %}{{ key }}={{ value }}
+{% endfor %}{% endif %}</textarea>
+          </div>
+        </div>
+        <p class="notice">Los campos múltiples usan una línea <code>campo=valor</code>.</p>
+        <button type="submit">Guardar tipo</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>{{ "Editar" if editing_action else "Nueva" }} acción</h2>
+      <p class="notice">
+        Una acción desconocida debe permanecer bloqueada. Solo las acciones
+        revisadas pueden marcarse como consulta o diagnóstico.
+        <br>Configurador con confirmaciones automáticas.
+      </p>
+      <form method="post" action="/configuration/action">
+        <div class="subsection wide" style="margin-bottom:16px">
+          <h3>Edición de campos</h3>
+          <p class="notice">
+            Para reproducir cambios en la ficha sin pulsar acciones de menú.
+            Formato por línea: <code>etiqueta del campo|valor</code>.
+            Ejemplo: <code>Estado|Firmado</code>.
+          </p>
+          <div class="wide">
+            <label for="field_edits">Campos a editar</label>
+            <textarea id="field_edits" name="field_edits"
+                      placeholder="Estado|Firmado">{{ field_edits_text }}</textarea>
+          </div>
+        </div>
+        <div class="subsection wide" style="margin-bottom:16px">
+          <h3>Diálogos automáticos</h3>
+          <p class="notice">
+            Si la acción abre diálogos antes del resultado, defina aquí cada
+            paso en orden. Formato por línea:
+            <code>texto del diálogo|botón|selección opcional</code>.
+            Ejemplo:
+            <code>Por términos|Aceptar|Por términos</code>.
+          </p>
+          <p>
+            <input id="auto_confirm" name="auto_confirm" type="checkbox"
+                   value="yes" style="width:auto"
+                   {% if editing_action and editing_action.auto_confirm %}checked{% endif %}>
+            <label for="auto_confirm" style="display:inline;font-weight:600">
+              Resolver automáticamente los diálogos
+            </label>
+          </p>
+          <div class="wide" style="margin-top:12px">
+            <label for="dialog_steps">Pasos de diálogo</label>
+            <textarea id="dialog_steps" name="dialog_steps"
+                      placeholder="¿Desea crear los borradores de facturas|Sí&#10;Por términos|Aceptar|Por términos">{{ dialog_steps_text }}</textarea>
+          </div>
+        </div>
+        <div class="grid">
+          <div>
+            <label for="type_id">Tipo de ficha</label>
+            <select id="type_id" name="type_id" required>
+              {% for type in document_types %}
+                <option value="{{ type.id }}"
+                        {% if type.id == selected_type %}selected{% endif %}>
+                  {{ type.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="action_id">ID interno</label>
+            <input id="action_id" name="id" required
+                   pattern="[a-z][a-z0-9_-]{1,49}"
+                   value="{{ editing_action.id if editing_action else '' }}"
+                   {% if editing_action %}readonly{% endif %}>
+          </div>
+          <div>
+            <label for="safety">Clasificación</label>
+            {% set safety = editing_action.safety if editing_action else 'blocked' %}
+            <select id="safety" name="safety">
+              <option value="blocked" {% if safety == 'blocked' %}selected{% endif %}>Bloqueada</option>
+              <option value="read_only" {% if safety == 'read_only' %}selected{% endif %}>Consulta</option>
+              <option value="interactive" {% if safety == 'interactive' %}selected{% endif %}>Interactiva (reproduce flujo)</option>
+              <option value="diagnostic" {% if safety == 'diagnostic' %}selected{% endif %}>Diagnóstico (alias interactiva)</option>
+            </select>
+          </div>
+          <div>
+            <label for="action_label">Nombre mostrado</label>
+            <input id="action_label" name="label" required
+                   value="{{ editing_action.label if editing_action else discovered_label }}">
+          </div>
+          <div>
+            <label for="menu_aria_label">Etiqueta ARIA del menú</label>
+            <input id="menu_aria_label" name="menu_aria_label"
+                   value="{{ editing_action.menu_aria_label if editing_action else discovered_menu }}">
+          </div>
+          <div>
+            <label for="action_aria_label">Etiqueta ARIA de la acción</label>
+            <input id="action_aria_label" name="action_aria_label"
+                   value="{{ editing_action.action_aria_label if editing_action else discovered_label }}">
+          </div>
+          <div class="wide">
+            <label for="result_markers">Textos que indican resultado</label>
+            <textarea id="result_markers" name="result_markers">{% if editing_action %}{% for marker in editing_action.result_markers %}{{ marker }}
+{% endfor %}{% endif %}</textarea>
+          </div>
+        </div>
+        <p>
+          <input id="parse_error_rows" name="parse_error_rows" type="checkbox"
+                 value="yes" style="width:auto"
+                 {% if editing_action and editing_action.parse_error_rows %}checked{% endif %}>
+          <label for="parse_error_rows" style="display:inline">
+            Interpretar la página estándar “Mensajes de error”
+          </label>
+        </p>
+        <button type="submit">Guardar acción</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

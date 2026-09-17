@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agente BC · Diagnóstico</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Segoe UI", sans-serif;
+      color: #242424;
+      background: #f5f5f5;
+    }
+    body { margin: 0; }
+    header {
+      background: #272727;
+      color: white;
+      padding: 18px max(24px, calc((100% - 1040px) / 2));
+    }
+    header h1 { margin: 0; font-size: 22px; }
+    header p { margin: 5px 0 0; color: #ddd; }
+    main { max-width: 1040px; margin: 24px auto; padding: 0 24px 48px; }
+    section {
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      margin-bottom: 18px;
+      padding: 22px;
+    }
+    h2 { margin-top: 0; font-size: 19px; }
+    h3 { font-size: 16px; }
+    .grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr;
+      gap: 16px;
+    }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input, select, button {
+      box-sizing: border-box;
+      font: inherit;
+      padding: 9px 11px;
+      width: 100%;
+    }
+    button {
+      width: auto;
+      background: #0067b8;
+      border: 0;
+      border-radius: 3px;
+      color: white;
+      cursor: pointer;
+      font-weight: 600;
+      padding: 10px 18px;
+    }
+    .confirm { margin: 18px 0; }
+    .confirm input { width: auto; margin-right: 8px; }
+    .confirm label { display: inline; font-weight: 400; }
+    .notice { color: #555; font-size: 14px; }
+    .error {
+      background: #fde7e9;
+      border-left: 5px solid #a80000;
+      padding: 14px;
+    }
+    .success {
+      background: #dff6dd;
+      border-left: 5px solid #107c10;
+      padding: 14px;
+    }
+    dl {
+      display: grid;
+      grid-template-columns: 190px 1fr;
+      gap: 8px 16px;
+    }
+    dt { font-weight: 600; }
+    dd { margin: 0; }
+    pre {
+      background: #f3f3f3;
+      border: 1px solid #ddd;
+      overflow: auto;
+      padding: 12px;
+      white-space: pre-wrap;
+    }
+    .ai-conclusion {
+      background: #f8fbff;
+      border: 1px solid #c7d9f0;
+      border-radius: 4px;
+      padding: 16px;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+    [hidden] {
+      display: none !important;
+    }
+    .ai-pending {
+      background: #fff8e6;
+      border-left: 5px solid #c19c00;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .ai-pending-spinner {
+      width: 18px;
+      height: 18px;
+      border: 3px solid #e8d9a0;
+      border-top-color: #8a6d00;
+      border-radius: 50%;
+      animation: ai-spin 0.9s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes ai-spin {
+      to { transform: rotate(360deg); }
+    }
+    img { border: 1px solid #ccc; max-width: 100%; }
+    @media (max-width: 760px) {
+      .grid { grid-template-columns: 1fr; }
+      dl { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Agente BC · Diagnóstico de registro</h1>
+    <p>Solo lectura, vista previa y propuestas. Nunca registra ni corrige.</p>
+    <p><a href="/configuration" style="color:#8cc8ff">Configurar tipos y acciones</a></p>
+  </header>
+  <main>
+    <section>
+      <h2>Nueva comprobación</h2>
+      {% if connection_error %}
+        <p class="error">No se pudieron cargar las empresas: {{ connection_error }}</p>
+      {% endif %}
+      <form method="post" action="/preview">
+        <div class="grid">
+          <div>
+            <label for="company">Empresa</label>
+            {% set selected_company = form.company or default_company or '' %}
+            <select id="company" name="company" required>
+              <option value="">Seleccione una empresa</option>
+              {% for company in companies %}
+                <option value="{{ company }}"
+                        {% if company == selected_company %}selected{% endif %}>
+                  {{ company }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="type_id">Tipo de ficha</label>
+            {% set selected_type = form.type_id or 'sales_invoice' %}
+            <select id="type_id" name="type_id" required>
+              {% for type in document_types %}
+                <option value="{{ type.id }}"
+                        {% if type.id == selected_type %}selected{% endif %}>
+                  {{ type.label }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label for="number">Número</label>
+            <input id="number" name="number" required value="{{ form.number or '' }}"
+                   placeholder="P4941" autocomplete="off">
+          </div>
+        </div>
+        <div style="margin-top:16px">
+          <label for="action_id">Acción configurada</label>
+          <select id="action_id" name="action_id" required>
+            <option value="">Seleccione una acción</option>
+            {% for type in document_types %}
+              {% for action in type.actions %}
+                <option value="{{ action.id }}" data-type="{{ type.id }}"
+                        {% if action.id == form.action_id and type.id == selected_type %}selected{% endif %}>
+                  {{ action.label }} · {{ action.safety }}
+                </option>
+              {% endfor %}
+            {% endfor %}
+          </select>
+        </div>
+        <p class="confirm">
+          <input id="confirmed" name="confirmed" type="checkbox" value="yes" required>
+          <label for="confirmed">
+            Confirmo que deseo reproducir en Business Central la acción
+            configurada (puede modificar datos según el flujo).
+          </label>
+        </p>
+        <button type="submit">Ejecutar acción y diagnosticar</button>
+        <button type="submit" formaction="/explore-actions" formnovalidate
+                style="background:#555">
+          Explorar acciones sin ejecutarlas
+        </button>
+        <p class="notice">
+          La operación puede tardar unos segundos mientras se abre el cliente web.
+        </p>
+      </form>
+    </section>
+
+    {% if error %}
+      <section>
+        <h2>No se pudo completar</h2>
+        <p class="error">{{ error }}</p>
+      </section>
+    {% endif %}
+
+    {% if document %}
+      <section>
+        <h2>Documento comprobado</h2>
+        <dl>
+          <dt>Empresa</dt><dd>{{ document.company }}</dd>
+          <dt>Tipo</dt><dd>
+            {% for type in document_types %}
+              {% if type.id == document.kind %}{{ type.label }}{% endif %}
+            {% endfor %}
+          </dd>
+          <dt>Número</dt><dd>{{ document.number }}</dd>
+          <dt>Estado</dt><dd>{{ document.status }}</dd>
+          <dt>Fecha de registro</dt><dd>{{ document.posting_date or 'Sin fecha' }}</dd>
+        </dl>
+      </section>
+    {% endif %}
+
+    {% if preview %}
+      <section>
+        <h2>Resultado de la acción</h2>
+        {% if preview.outcome == 'pending_confirmation' %}
+          <p class="error">
+            La acción quedó esperando confirmación. No se detectó el resultado
+            final; revise la captura y la configuración de confirmación.
+          </p>
+        {% elif preview.messages %}
+          <p class="error">
+            Business Central devolvió {{ preview.messages|length }} mensaje(s).
+          </p>
+          {% for message in preview.messages %}
+            <h3>{{ message.message_type }}: {{ message.description }}</h3>
+            <dl>
+              <dt>Contexto</dt><dd>{{ message.context or '—' }}</dd>
+              <dt>Campo</dt><dd>{{ message.context_field or '—' }}</dd>
+              <dt>Origen</dt><dd>{{ message.source or '—' }}</dd>
+              <dt>Campo origen</dt><dd>{{ message.source_field or '—' }}</dd>
+              <dt>Información</dt>
+              <dd>{{ message.additional_information or '—' }}</dd>
+            </dl>
+            {% if message.call_stack %}
+              <details>
+                <summary>Pila de llamadas</summary>
+                <pre>{{ message.call_stack }}</pre>
+              </details>
+            {% endif %}
+          {% endfor %}
+        {% else %}
+          <p class="success">
+            La acción terminó sin mensajes de error detectables.
+          </p>
+        {% endif %}
+        <h3>Captura</h3>
+        <img src="/reports/{{ preview.screenshot_path.name }}"
+             alt="Resultado de la vista previa de registro">
+      </section>
+    {% endif %}
+
+    {% if discovered_actions %}
+      <section>
+        <h2>Acciones visibles descubiertas</h2>
+        <p class="notice">
+          No se ha ejecutado ninguna. Deben revisarse y clasificarse antes de
+          habilitarlas.
+        </p>
+        {% if discovered_actions.actions %}
+          <ul>
+            {% for action in discovered_actions.actions %}
+              <li>
+                <strong>{{ action.label }}</strong>
+                {% if action.menu_aria_label %}
+                  — menú: {{ action.menu_aria_label }}
+                {% endif %}
+                {% if action.title %}<br><small>{{ action.title }}</small>{% endif %}
+                <br>
+                <a href="{{ url_for('configuration',
+                    type_id=form.type_id,
+                    action_label=action.label,
+                    menu_label=action.menu_aria_label or '') }}">
+                  Configurar esta acción
+                </a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p>No se localizaron acciones visibles.</p>
+        {% endif %}
+        <img src="/reports/{{ discovered_actions.screenshot_path.name }}"
+             alt="Ficha utilizada para explorar acciones">
+      </section>
+    {% endif %}
+
+    {% if diagnosis %}
+      <section>
+        <h2>Diagnóstico</h2>
+        <p>{{ diagnosis.summary }}</p>
+        <p><strong>Confianza:</strong> {{ diagnosis.confidence }}</p>
+        {% if enrichments %}
+          <h3>Evidencia adicional</h3>
+          {% for item in enrichments %}
+            <h4>{{ item.title }}</h4>
+            <dl>
+              {% for label, value in item.rows %}
+                <dt>{{ label }}</dt><dd>{{ value }}</dd>
+              {% endfor %}
+            </dl>
+          {% endfor %}
+        {% endif %}
+        <h3>Soluciones propuestas (referencia automática)</h3>
+        <ul>
+          {% for solution in diagnosis.proposed_solutions %}
+            <li>
+              {{ solution.description }}
+              <br><small>Verificación: {{ solution.verification }}</small>
+            </li>
+          {% endfor %}
+        </ul>
+        {% if diagnosis.source_matches %}
+          <h3>Candidatos en el código</h3>
+          {% for match in diagnosis.source_matches %}
+            <p><strong>{{ match.path }}:{{ match.line }}</strong></p>
+            <pre>{{ match.excerpt }}</pre>
+          {% endfor %}
+        {% endif %}
+      </section>
+    {% endif %}
+
+    {% if ai_pending %}
+      <section id="ai-conclusions-section">
+        <h2>Conclusiones IA</h2>
+        <div class="ai-pending" id="ai-conclusions-pending">
+          <div class="ai-pending-spinner" aria-hidden="true"></div>
+          <p>Preparando conclusiones con IA…</p>
+        </div>
+        <div id="ai-conclusions-content" hidden></div>
+      </section>
+      <script type="application/json" id="ai-request-data">{{ ai_request | tojson }}</script>
+    {% elif ai_conclusion %}
+      <section id="ai-conclusions-section">
+        <h2>Conclusiones IA</h2>
+        <p>
+          Modelo: <strong>{{ ai_conclusion.model }}</strong>
+          ({{ ai_conclusion.provider }})
+        </p>
+        {% if ai_conclusion.error %}
+          <p class="error">
+            No se pudo obtener una conclusión automática:
+            {{ ai_conclusion.error }}
+          </p>
+        {% else %}
+          <div class="ai-conclusion">{{ ai_conclusion.conclusion }}</div>
+        {% endif %}
+        <details>
+          <summary>Ver prompt enviado a la IA</summary>
+          <h3>Instrucciones del sistema</h3>
+          <pre>{{ ai_conclusion.system_prompt }}</pre>
+          <h3>Prompt del incidente</h3>
+          <pre>{{ ai_conclusion.user_prompt }}</pre>
+        </details>
+      </section>
+    {% endif %}
+  </main>
+  <script>
+    const typeSelect = document.getElementById("type_id");
+    const actionSelect = document.getElementById("action_id");
+    function updateActions() {
+      const typeId = typeSelect.value;
+      let selectedIsVisible = false;
+      for (const option of actionSelect.options) {
+        const owner = option.dataset.type;
+        option.hidden = Boolean(owner && owner !== typeId);
+        if (option.selected && owner === typeId && !option.hidden) {
+          selectedIsVisible = true;
+        }
+      }
+      if (!selectedIsVisible) {
+        const first = Array.from(actionSelect.options)
+          .find(option => option.dataset.type === typeId);
+        actionSelect.value = first ? first.value : "";
+      }
+    }
+    typeSelect.addEventListener("change", updateActions);
+    updateActions();
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function renderAiConclusion(data) {
+      const modelLine = `<p>Modelo: <strong>${escapeHtml(data.model)}</strong> (${escapeHtml(data.provider)})</p>`;
+      const body = data.error
+        ? `<p class="error">No se pudo obtener una conclusión automática: ${escapeHtml(data.error)}</p>`
+        : `<div class="ai-conclusion">${escapeHtml(data.conclusion)}</div>`;
+      const prompt = `
+        <details>
+          <summary>Ver prompt enviado a la IA</summary>
+          <h3>Instrucciones del sistema</h3>
+          <pre>${escapeHtml(data.system_prompt)}</pre>
+          <h3>Prompt del incidente</h3>
+          <pre>${escapeHtml(data.user_prompt)}</pre>
+        </details>`;
+      return modelLine + body + prompt;
+    }
+
+    async function loadAiConclusions() {
+      const requestNode = document.getElementById("ai-request-data");
+      const pendingNode = document.getElementById("ai-conclusions-pending");
+      const contentNode = document.getElementById("ai-conclusions-content");
+      if (!requestNode || !pendingNode || !contentNode) {
+        return;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(requestNode.textContent);
+      } catch (error) {
+        pendingNode.innerHTML = `<p class="error">No se pudo iniciar la consulta a la IA.</p>`;
+        return;
+      }
+      try {
+        const response = await fetch("/preview/ai-conclusions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error || "Error al consultar la IA");
+        }
+        pendingNode.hidden = true;
+        contentNode.hidden = false;
+        contentNode.innerHTML = renderAiConclusion(data);
+      } catch (error) {
+        pendingNode.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+      }
+    }
+
+    loadAiConclusions();
+  </script>
+</body>
+</html>
