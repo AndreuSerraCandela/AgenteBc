@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .browser import normalize_browser_channel
+
 
 class ConfigurationError(ValueError):
     """Configuración ausente o insegura."""
@@ -35,21 +37,48 @@ class Settings:
     tls_verify: bool
     request_timeout_seconds: float
     browser_headless: bool
+    browser_channel: str | None
+    ai_provider: str | None
     lm_studio_url: str | None
     lm_studio_model: str | None
+    deepseek_api_key: str | None
+    deepseek_model: str | None
+    deepseek_url: str | None
+    deepseek_web_url: str | None
+    deepseek_web_profile: Path | None
+    deepseek_web_timeout_seconds: float
+    deepseek_web_login_timeout_seconds: float
+    deepseek_web_cdp_url: str | None
+    ai_web_cdp_url: str | None
+    google_ai_web_url: str | None
     bc_agent_url: str | None
     bc_agent_token: str | None
 
     @classmethod
     def from_environment(cls) -> "Settings":
+        cls._load_all_env_files(override=False)
+        return cls._build_from_current_environment()
+
+    @classmethod
+    def load_fresh(cls, env_file: Path | None = None) -> "Settings":
+        if env_file is not None:
+            os.environ["AGENTEBC_ENV_FILE"] = str(env_file.expanduser())
+        cls._load_all_env_files(override=True)
+        return cls._build_from_current_environment()
+
+    @classmethod
+    def _load_all_env_files(cls, *, override: bool) -> None:
         env_file = Path(os.getenv("AGENTEBC_ENV_FILE", ".env")).expanduser()
-        _load_env_file(env_file)
+        _load_env_file(env_file, override=override)
         bc_env_file = _optional("AGENTEBC_BC_ENV_FILE")
         if bc_env_file:
-            _load_env_file(Path(bc_env_file).expanduser())
+            _load_env_file(Path(bc_env_file).expanduser(), override=override)
         sql_env_file = _optional("AGENTEBC_SQL_ENV_FILE")
         if sql_env_file:
-            _load_env_file(Path(sql_env_file).expanduser())
+            _load_env_file(Path(sql_env_file).expanduser(), override=override)
+
+    @classmethod
+    def _build_from_current_environment(cls) -> "Settings":
 
         source = os.getenv("AGENTEBC_SOURCE_PATH")
         alpackages = os.getenv("AGENTEBC_ALPACKAGES_PATH")
@@ -62,6 +91,32 @@ class Settings:
             ) from exc
         if timeout <= 0:
             raise ConfigurationError("AGENTEBC_REQUEST_TIMEOUT debe ser positivo")
+
+        web_timeout_text = os.getenv("AGENTEBC_DEEPSEEK_WEB_TIMEOUT", "90")
+        try:
+            web_timeout = float(web_timeout_text)
+        except ValueError as exc:
+            raise ConfigurationError(
+                "AGENTEBC_DEEPSEEK_WEB_TIMEOUT debe ser numérico"
+            ) from exc
+        if web_timeout <= 0:
+            raise ConfigurationError(
+                "AGENTEBC_DEEPSEEK_WEB_TIMEOUT debe ser positivo"
+            )
+
+        login_timeout_text = os.getenv("AGENTEBC_DEEPSEEK_WEB_LOGIN_TIMEOUT", "120")
+        try:
+            login_timeout = float(login_timeout_text)
+        except ValueError as exc:
+            raise ConfigurationError(
+                "AGENTEBC_DEEPSEEK_WEB_LOGIN_TIMEOUT debe ser numérico"
+            ) from exc
+        if login_timeout <= 0:
+            raise ConfigurationError(
+                "AGENTEBC_DEEPSEEK_WEB_LOGIN_TIMEOUT debe ser positivo"
+            )
+
+        deepseek_web_profile = _optional("AGENTEBC_DEEPSEEK_WEB_PROFILE")
 
         settings = cls(
             odata_base_url=_optional("AGENTEBC_ODATA_BASE_URL"),
@@ -93,13 +148,46 @@ class Settings:
                 os.getenv("AGENTEBC_BROWSER_HEADLESS", "false"),
                 name="AGENTEBC_BROWSER_HEADLESS",
             ),
+            browser_channel=_load_browser_channel(),
+            ai_provider=_resolve_ai_provider(
+                _optional("AGENTEBC_AI_PROVIDER"),
+                lm_studio_url=_optional("AGENTEBC_LM_STUDIO_URL"),
+                deepseek_api_key=_optional("AGENTEBC_DEEPSEEK_API_KEY"),
+            ),
             lm_studio_url=_optional("AGENTEBC_LM_STUDIO_URL"),
             lm_studio_model=_optional("AGENTEBC_LM_STUDIO_MODEL"),
+            deepseek_api_key=_optional("AGENTEBC_DEEPSEEK_API_KEY"),
+            deepseek_model=_optional("AGENTEBC_DEEPSEEK_MODEL"),
+            deepseek_url=_optional("AGENTEBC_DEEPSEEK_URL"),
+            deepseek_web_url=_optional("AGENTEBC_DEEPSEEK_WEB_URL"),
+            deepseek_web_profile=(
+                Path(deepseek_web_profile).expanduser().resolve()
+                if deepseek_web_profile
+                else None
+            ),
+            deepseek_web_timeout_seconds=web_timeout,
+            deepseek_web_login_timeout_seconds=login_timeout,
+            deepseek_web_cdp_url=_optional("AGENTEBC_DEEPSEEK_WEB_CDP_URL"),
+            ai_web_cdp_url=(
+                _optional("AGENTEBC_AI_WEB_CDP_URL")
+                or _optional("AGENTEBC_DEEPSEEK_WEB_CDP_URL")
+            ),
+            google_ai_web_url=_optional("AGENTEBC_GOOGLE_AI_WEB_URL"),
             bc_agent_url=_optional("AGENTEBC_BC_AGENT_URL"),
             bc_agent_token=_optional("AGENTEBC_BC_AGENT_TOKEN"),
         )
         settings.validate()
         return settings
+
+    @property
+    def ai_enabled(self) -> bool:
+        if self.ai_provider == "lm_studio":
+            return bool(self.lm_studio_url)
+        if self.ai_provider == "deepseek":
+            return bool(self.deepseek_api_key)
+        if self.ai_provider in {"deepseek_web", "google_ai_web"}:
+            return True
+        return False
 
     def validate(self) -> None:
         if self.auth_mode not in {"windows", "basic"}:
@@ -128,6 +216,26 @@ class Settings:
                 "AGENTEBC_BC_AGENT_TOKEN es obligatorio si se configura "
                 "AGENTEBC_BC_AGENT_URL"
             )
+        if self.ai_provider == "lm_studio" and not self.lm_studio_url:
+            raise ConfigurationError(
+                "AGENTEBC_LM_STUDIO_URL es obligatorio si "
+                "AGENTEBC_AI_PROVIDER=lm_studio"
+            )
+        if self.ai_provider == "deepseek" and not self.deepseek_api_key:
+            raise ConfigurationError(
+                "AGENTEBC_DEEPSEEK_API_KEY es obligatorio si "
+                "AGENTEBC_AI_PROVIDER=deepseek"
+            )
+        if self.ai_provider and self.ai_provider not in {
+            "lm_studio",
+            "deepseek",
+            "deepseek_web",
+            "google_ai_web",
+        }:
+            raise ConfigurationError(
+                "AGENTEBC_AI_PROVIDER debe ser lm_studio, deepseek, "
+                "deepseek_web o google_ai_web"
+            )
 
     def safe_summary(self) -> dict[str, object]:
         return {
@@ -151,11 +259,52 @@ class Settings:
             "tls_verify": self.tls_verify,
             "request_timeout_seconds": self.request_timeout_seconds,
             "browser_headless": self.browser_headless,
+            "browser_channel": self.browser_channel,
+            "ai_provider": self.ai_provider,
+            "ai_enabled": self.ai_enabled,
             "lm_studio_configured": bool(self.lm_studio_url),
             "lm_studio_model": self.lm_studio_model,
+            "deepseek_configured": bool(self.deepseek_api_key),
+            "deepseek_model": self.deepseek_model,
+            "deepseek_url": self.deepseek_url,
+            "deepseek_web_url": self.deepseek_web_url,
+            "deepseek_web_profile": (
+                str(self.deepseek_web_profile)
+                if self.deepseek_web_profile
+                else None
+            ),
+            "deepseek_web_timeout_seconds": self.deepseek_web_timeout_seconds,
+            "deepseek_web_login_timeout_seconds": (
+                self.deepseek_web_login_timeout_seconds
+            ),
+            "deepseek_web_cdp_configured": bool(self.deepseek_web_cdp_url),
+            "ai_web_cdp_configured": bool(self.ai_web_cdp_url),
+            "google_ai_web_url": self.google_ai_web_url,
             "bc_agent_configured": bool(self.bc_agent_url and self.bc_agent_token),
             "bc_agent_url": self.bc_agent_url,
         }
+
+
+def _load_browser_channel() -> str | None:
+    try:
+        return normalize_browser_channel(_optional("AGENTEBC_BROWSER_CHANNEL"))
+    except ValueError as exc:
+        raise ConfigurationError(str(exc)) from exc
+
+
+def _resolve_ai_provider(
+    explicit: str | None,
+    *,
+    lm_studio_url: str | None,
+    deepseek_api_key: str | None,
+) -> str | None:
+    if explicit:
+        return explicit.strip().lower()
+    if lm_studio_url:
+        return "lm_studio"
+    if deepseek_api_key:
+        return "deepseek"
+    return None
 
 
 def _optional(name: str, *, strip: bool = True) -> str | None:
@@ -166,7 +315,7 @@ def _optional(name: str, *, strip: bool = True) -> str | None:
     return value or None
 
 
-def _load_env_file(path: Path) -> None:
+def _load_env_file(path: Path, *, override: bool = False) -> None:
     if not path.is_file():
         return
     try:
@@ -193,7 +342,10 @@ def _load_env_file(path: Path) -> None:
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
-        os.environ.setdefault(name, value)
+        if override:
+            os.environ[name] = value
+        else:
+            os.environ.setdefault(name, value)
 
 
 def _legacy_sql_connection_string() -> str | None:

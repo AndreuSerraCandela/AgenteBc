@@ -1,6 +1,13 @@
 flask<4,>=3.1
 playwright<2,>=1.55
+python-dotenv<2,>=1.0
 requests<3,>=2.32
+
+[build]
+pyinstaller<7,>=6
+
+[desktop]
+pywebview<6,>=5
 
 [dev]
 pytest<9,>=8.3

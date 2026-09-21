@@ -34,6 +34,9 @@ def test_loads_project_and_referenced_sql_env(
         "AGENTEBC_ODATA_BASE_URL",
         "AGENTEBC_AUTH_MODE",
         "AGENTEBC_SQL_ENV_FILE",
+        "AGENTEBC_COMPANY",
+        "AGENTEBC_USERNAME",
+        "AGENTEBC_PASSWORD",
         "SQL_SERVER",
         "SQL_DATABASE",
         "SQL_USER",
@@ -42,6 +45,7 @@ def test_loads_project_and_referenced_sql_env(
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENTEBC_ENV_FILE", str(tmp_path / ".env"))
 
     settings = Settings.from_environment()
 

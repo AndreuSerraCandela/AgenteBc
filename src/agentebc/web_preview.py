@@ -9,6 +9,7 @@ from urllib.parse import urlencode, urlparse
 
 from playwright.sync_api import Frame, Locator, Page, TimeoutError, sync_playwright
 
+from .browser import launch_browser
 from .call_stack import extract_call_stack_text
 from .config import Settings
 from .document_types import (
@@ -120,15 +121,7 @@ class BusinessCentralWebPreview:
         )
 
         with sync_playwright() as playwright:
-            try:
-                browser = playwright.chromium.launch(
-                    channel="msedge",
-                    headless=self._settings.browser_headless,
-                )
-            except Exception:
-                browser = playwright.chromium.launch(
-                    headless=self._settings.browser_headless
-                )
+            browser = launch_browser(playwright, self._settings)
             try:
                 context = browser.new_context(
                     viewport={"width": 1440, "height": 1000}
@@ -1116,15 +1109,7 @@ class BusinessCentralActionExplorer:
         )
 
         with sync_playwright() as playwright:
-            try:
-                browser = playwright.chromium.launch(
-                    channel="msedge",
-                    headless=self._settings.browser_headless,
-                )
-            except Exception:
-                browser = playwright.chromium.launch(
-                    headless=self._settings.browser_headless
-                )
+            browser = launch_browser(playwright, self._settings)
             try:
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
                 page.set_default_timeout(15_000)

@@ -87,6 +87,18 @@
       white-space: pre-wrap;
       line-height: 1.5;
     }
+    .ai-external {
+      background: #f8fbff;
+      border: 1px solid #c7d9f0;
+      border-radius: 4px;
+      padding: 16px;
+    }
+    .ai-external-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
     [hidden] {
       display: none !important;
     }
@@ -121,7 +133,12 @@
   <header>
     <h1>Agente BC · Diagnóstico de registro</h1>
     <p>Solo lectura, vista previa y propuestas. Nunca registra ni corrige.</p>
-    <p><a href="/configuration" style="color:#8cc8ff">Configurar tipos y acciones</a></p>
+    <p>
+      <a href="/setup" style="color:#8cc8ff">Configuración general</a>
+      ·
+      <a href="/configuration" style="color:#8cc8ff">Tipos y acciones</a>
+    </p>
+    <p id="app-version" hidden style="font-size:12px;color:#aaa"></p>
   </header>
   <main>
     <section>
@@ -332,11 +349,14 @@
         <h2>Conclusiones IA</h2>
         <div class="ai-pending" id="ai-conclusions-pending">
           <div class="ai-pending-spinner" aria-hidden="true"></div>
-          <p>Preparando conclusiones con IA…</p>
+          <p>{% if ai_provider == 'deepseek_web' %}Enviando consulta a DeepSeek…{% elif ai_provider == 'google_ai_web' %}Enviando consulta a Google Modo IA…{% else %}Preparando conclusiones con IA…{% endif %}</p>
+          {% if ai_provider in ['deepseek_web', 'google_ai_web'] %}
+            <p class="notice">Se usará Chrome para enviar la consulta. Lee la respuesta en la pestaña de IA; no hace falta esperar aquí.</p>
+          {% endif %}
         </div>
         <div id="ai-conclusions-content" hidden></div>
       </section>
-      <script type="application/json" id="ai-request-data">{{ ai_request | tojson }}</script>
+      <script type="application/json" id="ai-request-data" data-ai-provider="{{ ai_provider or '' }}">{{ ai_request | tojson }}</script>
     {% elif ai_conclusion %}
       <section id="ai-conclusions-section">
         <h2>Conclusiones IA</h2>
@@ -349,6 +369,14 @@
             No se pudo obtener una conclusión automática:
             {{ ai_conclusion.error }}
           </p>
+        {% elif ai_conclusion.external_view %}
+          <div class="ai-external">
+            <p>La consulta se ha enviado a {{ ai_conclusion.external_label or 'la IA' }}. Lee las conclusiones allí.</p>
+            <div class="ai-external-actions">
+              <a href="#" onclick="openAiExternal('{{ ai_conclusion.external_url }}', {{ 'true' if ai_conclusion.external_cdp_available else 'false' }}, '{{ ai_conclusion.external_label or 'IA' }}'); return false;">Ver conclusiones en IA</a>
+              <button type="button" onclick="openAiExternal('{{ ai_conclusion.external_url }}', {{ 'true' if ai_conclusion.external_cdp_available else 'false' }}, '{{ ai_conclusion.external_label or 'IA' }}')">Ir a pestaña de {{ ai_conclusion.external_label or 'IA' }}</button>
+            </div>
+          </div>
         {% else %}
           <div class="ai-conclusion">{{ ai_conclusion.conclusion }}</div>
         {% endif %}
@@ -391,11 +419,46 @@
         .replaceAll(">", "&gt;");
     }
 
+    async function openAiExternal(url, useCdp = false, label = "IA") {
+      if (useCdp) {
+        try {
+          const response = await fetch("/preview/ai-focus-external", {
+            method: "POST",
+          });
+          if (response.ok) {
+            return;
+          }
+        } catch (error) {
+          // Fallback a abrir la URL si CDP no está disponible.
+        }
+      }
+      const windowName = `agentebc-${label.toLowerCase().replaceAll(/\s+/g, "-")}`;
+      const externalWindow = window.open(url, windowName);
+      if (externalWindow) {
+        externalWindow.focus();
+      }
+    }
+
     function renderAiConclusion(data) {
       const modelLine = `<p>Modelo: <strong>${escapeHtml(data.model)}</strong> (${escapeHtml(data.provider)})</p>`;
-      const body = data.error
-        ? `<p class="error">No se pudo obtener una conclusión automática: ${escapeHtml(data.error)}</p>`
-        : `<div class="ai-conclusion">${escapeHtml(data.conclusion)}</div>`;
+      let body;
+      if (data.error) {
+        body = `<p class="error">No se pudo obtener una conclusión automática: ${escapeHtml(data.error)}</p>`;
+      } else if (data.external_view) {
+        const url = escapeHtml(data.external_url || "https://chat.deepseek.com");
+        const label = escapeHtml(data.external_label || "IA");
+        const useCdp = data.external_cdp_available ? "true" : "false";
+        body = `
+          <div class="ai-external">
+            <p>La consulta se ha enviado a ${label}. Lee las conclusiones allí.</p>
+            <div class="ai-external-actions">
+              <a href="#" onclick="openAiExternal('${url}', ${useCdp}, '${label}'); return false;">Ver conclusiones en IA</a>
+              <button type="button" onclick="openAiExternal('${url}', ${useCdp}, '${label}')">Ir a pestaña de ${label}</button>
+            </div>
+          </div>`;
+      } else {
+        body = `<div class="ai-conclusion">${escapeHtml(data.conclusion)}</div>`;
+      }
       const prompt = `
         <details>
           <summary>Ver prompt enviado a la IA</summary>
@@ -421,11 +484,16 @@
         pendingNode.innerHTML = `<p class="error">No se pudo iniciar la consulta a la IA.</p>`;
         return;
       }
+      const provider = requestNode.dataset.aiProvider || "";
+      const timeoutMs = provider === "deepseek_web" || provider === "google_ai_web" ? 45000 : 105000;
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
       try {
         const response = await fetch("/preview/ai-conclusions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
+          signal: controller.signal,
         });
         const data = await response.json();
         if (!response.ok) {
@@ -435,11 +503,34 @@
         contentNode.hidden = false;
         contentNode.innerHTML = renderAiConclusion(data);
       } catch (error) {
-        pendingNode.innerHTML = `<p class="error">${escapeHtml(error.message)}</p>`;
+        const message = error.name === "AbortError"
+          ? "La consulta a la IA tardó demasiado. Comprueba Chrome/DeepSeek o usa la API."
+          : error.message;
+        pendingNode.innerHTML = `<p class="error">${escapeHtml(message)}</p>`;
+      } finally {
+        window.clearTimeout(timeoutId);
       }
     }
 
     loadAiConclusions();
+
+    async function loadAppInfo() {
+      try {
+        const response = await fetch("/api/app-info");
+        const data = await response.json();
+        const node = document.getElementById("app-version");
+        if (!node || !data.version) {
+          return;
+        }
+        const modeLabel = data.mode === "desktop" ? " · Escritorio" : "";
+        node.textContent = `AgenteBc ${data.version}${modeLabel}`;
+        node.hidden = false;
+      } catch (error) {
+        // Información opcional en la cabecera.
+      }
+    }
+
+    loadAppInfo();
   </script>
 </body>
 </html>

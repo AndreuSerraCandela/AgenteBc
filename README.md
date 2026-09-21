@@ -47,6 +47,16 @@ Para autenticación integrada de Windows:
 python -m pip install -e ".[windows-auth]"
 ```
 
+### Aplicación de escritorio (consultores)
+
+```powershell
+python -m pip install -e ".[desktop]"
+agentebc-desktop
+```
+
+Build del instalador Windows, actualizaciones y despliegue en
+`docs/DESKTOP.md`.
+
 ## Configuración
 
 Las credenciales no se guardan en el repositorio. La aplicación carga el

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configuración · AgenteBc</title>
+  <style>
+    body { margin:0; font-family:"Segoe UI",sans-serif; background:#f5f5f5; color:#242424; }
+    header { background:#272727; color:white; padding:18px max(24px,calc((100% - 900px)/2)); }
+    header h1 { margin:0 0 6px; font-size:22px; }
+    header p { margin:0; color:#ddd; }
+    header a { color:#8cc8ff; }
+    main { max-width:900px; margin:24px auto; padding:0 24px 48px; }
+    section {
+      background:white; border:1px solid #ddd; border-radius:6px;
+      margin-bottom:18px; padding:22px;
+    }
+    h2 { margin-top:0; font-size:19px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .wide { grid-column:1/-1; }
+    label { display:block; font-weight:600; margin-bottom:6px; }
+    input,select { box-sizing:border-box; font:inherit; padding:8px 10px; width:100%; }
+    .hint { color:#666; font-size:13px; margin-top:4px; }
+    button,.button {
+      background:#0067b8; border:0; border-radius:3px; color:white;
+      cursor:pointer; display:inline-block; font-weight:600; padding:10px 18px;
+      text-decoration:none;
+    }
+    .button.secondary { background:#5a5a5a; }
+    .error { background:#fde7e9; border-left:5px solid #a80000; padding:12px; }
+    .success { background:#dff6dd; border-left:5px solid #107c10; padding:12px; }
+    .ai-block { display:none; background:#f8fbff; border:1px solid #c7dff7; border-radius:4px; padding:14px; }
+    .ai-block.active { display:block; }
+    .actions { display:flex; gap:12px; flex-wrap:wrap; margin-top:8px; }
+    code { background:#f3f3f3; padding:2px 4px; }
+    @media(max-width:700px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Configuración de AgenteBc</h1>
+    <p>Conexión a Business Central, código remoto e IA. No hace falta editar el <code>.env</code> manualmente.</p>
+    {% if setup_complete %}<p><a href="/">Volver al diagnóstico</a></p>{% endif %}
+  </header>
+  <main>
+    {% if saved %}<p class="success">Configuración guardada correctamente.</p>{% endif %}
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    {% if test_ok %}<p class="success">{{ test_ok }}</p>{% endif %}
+
+    <form method="post" action="/setup">
+      <section>
+        <h2>Business Central</h2>
+        <div class="grid">
+          <div class="wide">
+            <label for="AGENTEBC_ODATA_BASE_URL">URL OData</label>
+            <input id="AGENTEBC_ODATA_BASE_URL" name="AGENTEBC_ODATA_BASE_URL" value="{{ values.AGENTEBC_ODATA_BASE_URL or '' }}" placeholder="https://servidor/instancia/ODataV4" required>
+          </div>
+          <div>
+            <label for="AGENTEBC_COMPANY">Empresa por defecto</label>
+            <input id="AGENTEBC_COMPANY" name="AGENTEBC_COMPANY" value="{{ values.AGENTEBC_COMPANY or '' }}" required>
+          </div>
+          <div>
+            <label for="AGENTEBC_AUTH_MODE">Autenticación</label>
+            <select id="AGENTEBC_AUTH_MODE" name="AGENTEBC_AUTH_MODE">
+              <option value="basic" {% if values.AGENTEBC_AUTH_MODE == 'basic' %}selected{% endif %}>Usuario y contraseña</option>
+              <option value="windows" {% if values.AGENTEBC_AUTH_MODE == 'windows' %}selected{% endif %}>Windows integrada</option>
+            </select>
+          </div>
+          <div>
+            <label for="AGENTEBC_USERNAME">Usuario BC</label>
+            <input id="AGENTEBC_USERNAME" name="AGENTEBC_USERNAME" value="{{ values.AGENTEBC_USERNAME or '' }}" autocomplete="username">
+          </div>
+          <div>
+            <label for="AGENTEBC_PASSWORD">Contraseña BC</label>
+            <input id="AGENTEBC_PASSWORD" name="AGENTEBC_PASSWORD" type="password" value="" placeholder="{% if values.AGENTEBC_PASSWORD %}Dejar vacío para no cambiar{% else %}Contraseña{% endif %}" autocomplete="current-password">
+          </div>
+          <div>
+            <label for="AGENTEBC_TLS_VERIFY">Verificar TLS</label>
+            <select id="AGENTEBC_TLS_VERIFY" name="AGENTEBC_TLS_VERIFY">
+              <option value="true" {% if values.AGENTEBC_TLS_VERIFY != 'false' %}selected{% endif %}>Sí</option>
+              <option value="false" {% if values.AGENTEBC_TLS_VERIFY == 'false' %}selected{% endif %}>No</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Código y evidencia</h2>
+        <div class="grid">
+          <div class="wide">
+            <label for="AGENTEBC_BC_AGENT_URL">Agente remoto de objetos BC</label>
+            <input id="AGENTEBC_BC_AGENT_URL" name="AGENTEBC_BC_AGENT_URL" value="{{ values.AGENTEBC_BC_AGENT_URL or '' }}" placeholder="http://192.168.x.x:5051">
+            <p class="hint">Recomendado en lugar de rutas locales de fuentes.</p>
+          </div>
+          <div class="wide">
+            <label for="AGENTEBC_BC_AGENT_TOKEN">Token del agente remoto</label>
+            <input id="AGENTEBC_BC_AGENT_TOKEN" name="AGENTEBC_BC_AGENT_TOKEN" type="password" value="" placeholder="{% if values.AGENTEBC_BC_AGENT_TOKEN %}Dejar vacío para no cambiar{% endif %}">
+          </div>
+          <div class="wide">
+            <label for="AGENTEBC_SQL_ENV_FILE">Fichero SQL opcional</label>
+            <input id="AGENTEBC_SQL_ENV_FILE" name="AGENTEBC_SQL_ENV_FILE" value="{{ values.AGENTEBC_SQL_ENV_FILE or '' }}" placeholder="C:\ruta\db.local.env">
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Conclusiones con IA</h2>
+        <div class="grid">
+          <div class="wide">
+            <label for="AGENTEBC_AI_PROVIDER">Proveedor</label>
+            <select id="AGENTEBC_AI_PROVIDER" name="AGENTEBC_AI_PROVIDER">
+              <option value="" {% if not values.AGENTEBC_AI_PROVIDER %}selected{% endif %}>Desactivado</option>
+              <option value="lm_studio" {% if values.AGENTEBC_AI_PROVIDER == 'lm_studio' %}selected{% endif %}>LM Studio (local/red)</option>
+              <option value="deepseek" {% if values.AGENTEBC_AI_PROVIDER == 'deepseek' %}selected{% endif %}>DeepSeek API</option>
+              <option value="deepseek_web" {% if values.AGENTEBC_AI_PROVIDER == 'deepseek_web' %}selected{% endif %}>DeepSeek web (Chrome CDP)</option>
+              <option value="google_ai_web" {% if values.AGENTEBC_AI_PROVIDER == 'google_ai_web' %}selected{% endif %}>Google Modo IA (Chrome CDP)</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="ai-lm-studio" class="ai-block wide">
+          <div class="grid">
+            <div class="wide">
+              <label for="AGENTEBC_LM_STUDIO_URL">URL LM Studio</label>
+              <input name="AGENTEBC_LM_STUDIO_URL" value="{{ values.AGENTEBC_LM_STUDIO_URL or '' }}">
+            </div>
+            <div>
+              <label for="AGENTEBC_LM_STUDIO_MODEL">Modelo</label>
+              <input name="AGENTEBC_LM_STUDIO_MODEL" value="{{ values.AGENTEBC_LM_STUDIO_MODEL or '' }}">
+            </div>
+          </div>
+        </div>
+
+        <div id="ai-deepseek" class="ai-block wide">
+          <div class="grid">
+            <div class="wide">
+              <label for="AGENTEBC_DEEPSEEK_API_KEY">API key DeepSeek</label>
+              <input name="AGENTEBC_DEEPSEEK_API_KEY" type="password" value="" placeholder="{% if values.AGENTEBC_DEEPSEEK_API_KEY %}Dejar vacío para no cambiar{% endif %}">
+            </div>
+            <div>
+              <label for="AGENTEBC_DEEPSEEK_MODEL">Modelo</label>
+              <input name="AGENTEBC_DEEPSEEK_MODEL" value="{{ values.AGENTEBC_DEEPSEEK_MODEL or 'deepseek-chat' }}">
+            </div>
+          </div>
+        </div>
+
+        <div id="ai-web" class="ai-block wide">
+          <div class="grid">
+            <div class="wide">
+              <label for="AGENTEBC_AI_WEB_CDP_URL">Chrome CDP</label>
+              <input name="AGENTEBC_AI_WEB_CDP_URL" value="{{ values.AGENTEBC_AI_WEB_CDP_URL or 'http://127.0.0.1:9222' }}">
+              <p class="hint">AgenteBc abrirá Chrome con depuración si no está activo. Login manual la primera vez.</p>
+            </div>
+            <div class="wide" id="google-url-row">
+              <label for="AGENTEBC_GOOGLE_AI_WEB_URL">URL Google Modo IA</label>
+              <input name="AGENTEBC_GOOGLE_AI_WEB_URL" value="{{ values.AGENTEBC_GOOGLE_AI_WEB_URL or 'https://www.google.com/ai' }}">
+            </div>
+            <div class="wide" id="deepseek-url-row">
+              <label for="AGENTEBC_DEEPSEEK_WEB_URL">URL DeepSeek chat</label>
+              <input name="AGENTEBC_DEEPSEEK_WEB_URL" value="{{ values.AGENTEBC_DEEPSEEK_WEB_URL or 'https://chat.deepseek.com' }}">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <p class="hint">Fichero de configuración: <code>{{ env_file }}</code></p>
+        <div class="actions">
+          <button type="submit" name="action" value="save">Guardar configuración</button>
+          <button type="submit" name="action" value="test" class="button secondary">Probar conexión BC</button>
+          {% if setup_complete %}
+            <a class="button secondary" href="/">Ir al diagnóstico</a>
+          {% endif %}
+        </div>
+      </section>
+    </form>
+  </main>
+  <script>
+    const provider = document.getElementById("AGENTEBC_AI_PROVIDER");
+    const blocks = {
+      lm_studio: document.getElementById("ai-lm-studio"),
+      deepseek: document.getElementById("ai-deepseek"),
+      deepseek_web: document.getElementById("ai-web"),
+      google_ai_web: document.getElementById("ai-web"),
+    };
+    const googleRow = document.getElementById("google-url-row");
+    const deepseekRow = document.getElementById("deepseek-url-row");
+
+    function refreshAiBlocks() {
+      const value = provider.value;
+      Object.values(blocks).forEach((node) => node.classList.remove("active"));
+      if (blocks[value]) {
+        blocks[value].classList.add("active");
+      }
+      googleRow.hidden = value !== "google_ai_web";
+      deepseekRow.hidden = value !== "deepseek_web";
+    }
+
+    provider.addEventListener("change", refreshAiBlocks);
+    refreshAiBlocks();
+  </script>
+</body>
+</html>
