@@ -213,14 +213,13 @@ def actions_dir() -> Path:
         candidates.append(Path(configured).expanduser())
     if _IIS_ACTIONS_DIR.parent.is_dir():
         candidates.append(_IIS_ACTIONS_DIR)
+    candidates.append(Path.cwd() / "logs" / "shared-actions")
     candidates.append(Path.cwd() / "data" / "actions")
     candidates.append(_DEFAULT_ACTIONS_DIR)
     for path in candidates:
         if _writable_dir(path):
             return path.resolve()
-    fallback = Path.cwd() / "data" / "actions"
-    fallback.mkdir(parents=True, exist_ok=True)
-    return fallback.resolve()
+    return (Path.cwd() / "logs" / "shared-actions").resolve()
 
 
 def _writable_dir(path: Path) -> bool:
