@@ -7,6 +7,7 @@ Set-Location $Root
 
 Write-Host "Instalando dependencias de build..."
 python -m pip install -e ".[desktop,build]"
+$Version = python -c "from agentebc import __version__; print(__version__)"
 
 Write-Host "Generando icono desde images/logo-app.png..."
 python scripts/generate-icon.py
@@ -23,8 +24,9 @@ $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if ($iscc) {
     Write-Host "Compilando instalador con Inno Setup..."
     & $iscc "packaging\agentebc.iss"
-    Copy-Item "packaging\Output\AgenteBc-0.2.0-setup.exe" "packaging\releases\AgenteBc-0.2.0-setup.exe" -Force
-    $hash = (Get-FileHash "packaging\releases\AgenteBc-0.2.0-setup.exe" -Algorithm SHA256).Hash.ToLower()
+    $installer = "AgenteBc-$Version-setup.exe"
+    Copy-Item "packaging\Output\$installer" "packaging\releases\$installer" -Force
+    $hash = (Get-FileHash "packaging\releases\$installer" -Algorithm SHA256).Hash.ToLower()
     Write-Host "SHA256: $hash"
 } else {
     Write-Host "Inno Setup no encontrado. Instala Inno Setup 6 o abre packaging\agentebc.iss manualmente."
@@ -32,5 +34,5 @@ if ($iscc) {
 
 Write-Host ""
 Write-Host "Ejecutable: dist\AgenteBc.exe"
-Write-Host "Instalador: packaging\releases\AgenteBc-0.2.0-setup.exe"
+Write-Host "Instalador: packaging\releases\AgenteBc-$Version-setup.exe"
 Write-Host "Publica packaging\releases en https://agentebc.malla.es/releases/"
