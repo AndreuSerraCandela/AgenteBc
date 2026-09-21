@@ -20,7 +20,7 @@ SHARE_ID_PATTERN = re.compile(
 VALID_STATUSES = frozenset({"pending", "accepted", "rejected"})
 _ACK_STATUSES = frozenset({"accepted", "rejected"})
 _DEFAULT_ACTIONS_DIR = Path(__file__).resolve().parents[2] / "packaging" / "actions"
-_IIS_ACTIONS_DIR = Path(r"C:\inetpub\data\AgenteBc\actions")
+_OBSOLETE_IIS_ACTIONS_DIR = Path(r"C:\inetpub\data\AgenteBc\actions")
 _MAX_NOTE = 500
 _MAX_NAME = 80
 
@@ -207,30 +207,14 @@ class ActionShareStore:
 
 
 def actions_dir() -> Path:
-    candidates: list[Path] = []
     configured = os.getenv("AGENTEBC_ACTIONS_DIR", "").strip()
     if configured:
-        candidates.append(Path(configured).expanduser())
-    if _IIS_ACTIONS_DIR.parent.is_dir():
-        candidates.append(_IIS_ACTIONS_DIR)
-    candidates.append(Path.cwd() / "logs" / "shared-actions")
-    candidates.append(Path.cwd() / "data" / "actions")
-    candidates.append(_DEFAULT_ACTIONS_DIR)
-    for path in candidates:
-        if _writable_dir(path):
-            return path.resolve()
-    return (Path.cwd() / "logs" / "shared-actions").resolve()
-
-
-def _writable_dir(path: Path) -> bool:
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-        probe = path / ".write-test"
-        probe.write_text("ok", encoding="utf-8")
-        probe.unlink(missing_ok=True)
-        return True
-    except OSError:
-        return False
+        path = Path(configured).expanduser().resolve()
+        if path != _OBSOLETE_IIS_ACTIONS_DIR:
+            return path
+    if (Path.cwd() / "wsgi.py").is_file():
+        return (Path.cwd() / "data" / "actions").resolve()
+    return _DEFAULT_ACTIONS_DIR.resolve()
 
 
 def share_token() -> str:
