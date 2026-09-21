@@ -1,3 +1,5 @@
+import hashlib
+import io
 import json
 from pathlib import Path
 
@@ -54,3 +56,57 @@ def test_releases_dir_defaults_to_packaging_folder() -> None:
     path = releases_dir()
     assert path.name == "releases"
     assert "packaging" in str(path)
+
+
+def test_upload_release_writes_installer_and_manifest(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    releases = tmp_path / "releases"
+    releases.mkdir()
+    monkeypatch.setenv("AGENTEBC_RELEASES_DIR", str(releases))
+    monkeypatch.setenv("AGENTEBC_SHARE_TOKEN", "secret-token")
+    client = create_portal_app().test_client()
+    payload = b"fake-installer-bytes"
+    digest = hashlib.sha256(payload).hexdigest()
+
+    denied = client.post("/api/releases/upload")
+    assert denied.status_code == 401
+
+    bad_name = client.post(
+        "/api/releases/upload",
+        data={"file": (io.BytesIO(payload), "setup.exe")},
+        content_type="multipart/form-data",
+        headers={"X-AgenteBc-Share-Token": "secret-token"},
+    )
+    assert bad_name.status_code == 400
+
+    mismatch = client.post(
+        "/api/releases/upload",
+        data={
+            "file": (io.BytesIO(payload), "AgenteBc-0.2.6-setup.exe"),
+            "sha256": "0" * 64,
+        },
+        content_type="multipart/form-data",
+        headers={"X-AgenteBc-Share-Token": "secret-token"},
+    )
+    assert mismatch.status_code == 400
+
+    created = client.post(
+        "/api/releases/upload",
+        data={
+            "file": (io.BytesIO(payload), "AgenteBc-0.2.6-setup.exe"),
+            "release_notes": "Prueba de publicación",
+        },
+        content_type="multipart/form-data",
+        headers={"X-AgenteBc-Share-Token": "secret-token"},
+    )
+    assert created.status_code == 201
+    assert created.json["version"] == "0.2.6"
+    assert created.json["sha256"] == digest
+    installer = releases / "AgenteBc-0.2.6-setup.exe"
+    assert installer.read_bytes() == payload
+    manifest = json.loads((releases / "latest.json").read_text(encoding="utf-8"))
+    assert manifest["version"] == "0.2.6"
+    assert manifest["sha256"] == digest
+    assert manifest["download_url"].endswith("AgenteBc-0.2.6-setup.exe")

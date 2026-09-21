@@ -111,7 +111,8 @@
             <code>{{ manifest.download_url.split('/')[-1] }}</code>,
             pero el fichero aún no está en el servidor de releases.
             Genera el instalador con <code>scripts\build-desktop.ps1</code>
-            e Inno Setup, y cópialo en <code>{{ releases_dir }}</code>.
+            y súbelo con <code>python scripts/publish_release.py</code>
+            (no lo subas a git).
           </div>
         {% endif %}
         {% if manifest.release_notes %}

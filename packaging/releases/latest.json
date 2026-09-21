@@ -1,7 +1,7 @@
 {
-  "version": "0.2.5",
+  "version": "0.2.6",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.5-setup.exe",
-  "sha256": "1d88f696d87160e6b51ca15a3efed95084938ba46bbeaf98836a6c9118486a60",
-  "release_notes": "Los pasos de diálogo pueden usar preguntar: el agente espera a que rellene la ventana y muestra el aviso en AgenteBc."
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.6-setup.exe",
+  "sha256": "0749a8ef925fc6f6ebb1af2cd6e7f314b4de43cb4978ac2223082c249f83189e",
+  "release_notes": "El paso preguntar muestra el aviso en cuanto toca rellenar el diálogo, aunque el título no coincida al detalle. El instalador se publica por POST /api/releases/upload, no por git."
 }

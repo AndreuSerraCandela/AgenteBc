@@ -1,3 +1,3 @@
 """Asistente de diagnóstico para Business Central on-premises."""
 
-__version__ = "0.2.5"
+__version__ = "0.2.6"

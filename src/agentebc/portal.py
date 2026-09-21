@@ -1,17 +1,31 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, send_from_directory
+from flask import Flask, abort, jsonify, render_template, request, send_from_directory
 
 from . import __version__
-from .action_share import actions_dir, register_action_share_routes, share_token
+from .action_share import (
+    _auth_error,
+    _json_error,
+    actions_dir,
+    register_action_share_routes,
+    share_token,
+)
 from .updater import ReleaseManifest
 
 _DEFAULT_RELEASES_DIR = Path(__file__).resolve().parents[2] / "packaging" / "releases"
+_INSTALLER_NAME = re.compile(
+    r"^AgenteBc-(?P<version>\d+\.\d+\.\d+)-setup\.exe$",
+    re.IGNORECASE,
+)
+_MAX_INSTALLER_BYTES = 100 * 1024 * 1024
+_PUBLIC_RELEASES_BASE = "https://agentebc.malla.es/releases"
 
 
 def releases_dir() -> Path:
@@ -50,6 +64,7 @@ def create_portal_app() -> Flask:
         template_folder=str(package_dir / "templates"),
         static_folder=str(package_dir / "static"),
     )
+    app.config["MAX_CONTENT_LENGTH"] = _MAX_INSTALLER_BYTES
 
     @app.get("/")
     def portal_home():
@@ -106,7 +121,74 @@ def create_portal_app() -> Flask:
         )
 
     register_action_share_routes(app)
+    register_release_upload_routes(app)
     return app
+
+
+def register_release_upload_routes(app: Flask) -> None:
+    @app.post("/api/releases/upload")
+    def upload_release():
+        auth_error = _auth_error()
+        if auth_error is not None:
+            return auth_error
+        uploaded = request.files.get("file")
+        if uploaded is None or not (uploaded.filename or "").strip():
+            return _json_error("Falta el fichero del instalador", 400)
+        filename = Path(uploaded.filename).name
+        match = _INSTALLER_NAME.match(filename)
+        if match is None:
+            return _json_error(
+                "El nombre debe ser AgenteBc-X.Y.Z-setup.exe",
+                400,
+            )
+        filename_version = match.group("version")
+        version = (request.form.get("version") or filename_version).strip()
+        if version != filename_version:
+            return _json_error(
+                "La versión no coincide con el nombre del instalador",
+                400,
+            )
+        expected_sha = (request.form.get("sha256") or "").strip().lower()
+        folder = releases_dir()
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            dest = folder / filename
+            partial = dest.with_name(f"{dest.name}.partial")
+            uploaded.save(partial)
+            digest = hashlib.sha256(partial.read_bytes()).hexdigest()
+            if expected_sha and expected_sha != digest:
+                partial.unlink(missing_ok=True)
+                return _json_error("El SHA256 no coincide", 400)
+            os.replace(partial, dest)
+            download_url = (
+                request.form.get("download_url") or ""
+            ).strip() or f"{_PUBLIC_RELEASES_BASE}/{filename}"
+            manifest = {
+                "version": version,
+                "min_version": (request.form.get("min_version") or "0.2.0").strip()
+                or "0.2.0",
+                "download_url": download_url,
+                "sha256": digest,
+                "release_notes": (request.form.get("release_notes") or "").strip(),
+            }
+            (folder / "latest.json").write_text(
+                json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            return _json_error(f"No se pudo guardar el instalador: {exc}", 500)
+        return (
+            jsonify(
+                {
+                    "version": version,
+                    "filename": filename,
+                    "sha256": digest,
+                    "download_url": download_url,
+                    "installer_ready": True,
+                }
+            ),
+            201,
+        )
 
 
 def _parser() -> argparse.ArgumentParser:

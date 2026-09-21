@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -98,7 +99,7 @@ class BusinessCentralWebPreview:
         settings: Settings,
         *,
         reports_dir: Path | None = None,
-        on_prompt: Callable[[str | None], None] | None = None,
+        on_prompt: Callable[..., None] | None = None,
     ) -> None:
         if not settings.odata_base_url:
             raise ValueError("Falta AGENTEBC_ODATA_BASE_URL")
@@ -111,8 +112,12 @@ class BusinessCentralWebPreview:
         )
         self._on_prompt = on_prompt
 
-    def _set_prompt(self, text: str | None) -> None:
-        if self._on_prompt is not None:
+    def _set_prompt(self, text: str | None, *, asking: bool = False) -> None:
+        if self._on_prompt is None:
+            return
+        try:
+            self._on_prompt(text, asking)
+        except TypeError:
             self._on_prompt(text)
 
     def run(
@@ -706,6 +711,7 @@ class BusinessCentralWebPreview:
         )
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
+            self._announce_next_ask(action, completed)
             if self._handle_dialogs(page, action, completed, max_clicks=2):
                 if len(completed) >= len(action.dialog_steps):
                     return True
@@ -713,6 +719,18 @@ class BusinessCentralWebPreview:
                 return True
             page.wait_for_timeout(250)
         return len(completed) >= len(action.dialog_steps)
+
+    def _announce_next_ask(
+        self,
+        action: ActionDefinition,
+        completed: set[int],
+    ) -> None:
+        for index, step in enumerate(action.dialog_steps):
+            if index in completed:
+                continue
+            if step.is_ask:
+                self._set_prompt(step.ask_prompt(), asking=True)
+            return
 
     def _handle_dialogs(
         self,
@@ -739,11 +757,12 @@ class BusinessCentralWebPreview:
         for index, step in enumerate(action.dialog_steps):
             if index in completed:
                 continue
+            if step.is_ask:
+                self._set_prompt(step.ask_prompt(), asking=True)
             frame = self._find_dialog_frame(page, step)
             if frame is None:
                 return False
             if step.is_ask:
-                self._set_prompt(step.ask_prompt())
                 try:
                     if not self._wait_ask_dialog_closed(page, step):
                         raise PreviewError(
@@ -799,8 +818,8 @@ class BusinessCentralWebPreview:
                         continue
                 except Exception:
                     continue
-                text = dialog.inner_text(timeout=1_000)
-                if _confirmation_visible(text, step.markers):
+                text = _dialog_locator_text(dialog)
+                if _confirmation_visible(text, step.markers, loose=True):
                     return True
             text = frame.locator("body").inner_text(timeout=1_000)
         except Exception:
@@ -2323,11 +2342,58 @@ def _optional_attribute(value: str | None) -> str | None:
     return text or None
 
 
+def _fold_dialog_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFD", value or "")
+    stripped = "".join(
+        char for char in decomposed if unicodedata.category(char) != "Mn"
+    )
+    return " ".join(stripped.casefold().split())
+
+
+def _dialog_locator_text(dialog: Locator) -> str:
+    chunks: list[str] = []
+    try:
+        chunks.append(dialog.inner_text(timeout=1_000))
+    except Exception:
+        pass
+    for attr in ("aria-label", "title"):
+        try:
+            value = dialog.get_attribute(attr)
+        except Exception:
+            value = None
+        if value:
+            chunks.append(value)
+    try:
+        headings = dialog.locator(
+            '[role="heading"], h1, h2, h3, .ms-nav-content-caption'
+        )
+        for index in range(min(headings.count(), 4)):
+            chunks.append(headings.nth(index).inner_text(timeout=500))
+    except Exception:
+        pass
+    return "\n".join(chunk for chunk in chunks if chunk)
+
+
 def _confirmation_visible(
     body_text: str,
     confirmation_markers: tuple[str, ...],
+    *,
+    loose: bool = False,
 ) -> bool:
-    return any(marker in body_text for marker in confirmation_markers)
+    folded_body = _fold_dialog_text(body_text)
+    if not folded_body:
+        return False
+    for marker in confirmation_markers:
+        folded = _fold_dialog_text(marker)
+        if not folded:
+            continue
+        if folded in folded_body:
+            return True
+        if loose:
+            tokens = [token for token in folded.split() if len(token) >= 8]
+            if any(token in folded_body for token in tokens):
+                return True
+    return False
 
 
 _SHARE_DETAILS_LABELS = ("Compartir detalles", "Share details")

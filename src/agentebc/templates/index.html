@@ -574,14 +574,11 @@
             await new Promise((resolve) => window.setTimeout(resolve, 500));
             const statusResponse = await fetch("/api/preview-status");
             const status = await statusResponse.json();
-            if (status.state === "asking" && status.prompt) {
-              runStatusText.textContent = `${status.prompt} en Business Central y pulse Aceptar.`;
-            } else if (status.state === "running") {
-              runStatusText.textContent = "Ejecutando acción…";
-            } else if (status.state === "done") {
+            if (status.state === "done") {
               window.location.href = data.result_url || "/preview/last";
               return;
             }
+            runStatusText.textContent = status.prompt || "Ejecutando acción…";
           }
         } catch (error) {
           runStatusText.textContent = error.message || "Error al ejecutar la acción";
