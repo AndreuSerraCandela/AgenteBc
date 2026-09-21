@@ -1,7 +1,7 @@
 {
-  "version": "0.2.2",
+  "version": "0.2.3",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.2-setup.exe",
-  "sha256": "3b1fdf6092dae6621b30329fb6851fdc59e3069436fddae84cb50e505352ef7f",
-  "release_notes": "Compartir acciones entre consultores: envío desde configuración, buzón de nuevas acciones y aceptación e instalación local. El compañero debe aceptar; no se instala nada automáticamente."
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.3-setup.exe",
+  "sha256": "1eff54e64d8a14f0fe96dd8e3f20ab188493338a00654b5e82b989e76584a1bf",
+  "release_notes": "Registrar pedidos de compra: abre Más opciones y recorre Acciones > Registro > Otros > Registrar..."
 }

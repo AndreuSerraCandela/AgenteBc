@@ -201,7 +201,7 @@
         "id": "registrar",
         "label": "Registrar",
         "safety": "diagnostic",
-        "menu_aria_label": "Acciones relacionadas para Registrar",
+        "menu_aria_label": "Acciones|Registro|Otros",
         "action_aria_label": "Registrar...",
         "result_markers": [
           "Mensajes de error"
