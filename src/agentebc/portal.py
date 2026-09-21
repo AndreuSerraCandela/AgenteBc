@@ -101,7 +101,7 @@ def create_portal_app() -> Flask:
                     else None
                 ),
                 "share_enabled": bool(share_token()),
-                "actions_dir": str(actions_dir()),
+                "actions_dir": _safe_actions_dir(),
             }
         )
 
@@ -133,6 +133,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Releases: {releases_dir()}")
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
     return 0
+
+
+def _safe_actions_dir() -> str:
+    try:
+        return str(actions_dir())
+    except OSError:
+        return ""
 
 
 def _load_portal_environment() -> None:
