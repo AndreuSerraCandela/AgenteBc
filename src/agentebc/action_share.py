@@ -100,8 +100,12 @@ class SharedAction:
 
 
 class ActionShareStore:
-    def __init__(self, path: Path) -> None:
-        self.path = path
+    def __init__(self, path: Path | None = None) -> None:
+        self._fixed_path = path
+
+    @property
+    def path(self) -> Path:
+        return self._fixed_path or actions_dir()
 
     def share(
         self,
@@ -121,7 +125,12 @@ class ActionShareStore:
             document_type=type_payload,
             action=action_payload,
         )
-        self._write(item)
+        try:
+            self._write(item)
+        except OSError as exc:
+            raise ActionShareError(
+                f"No se pudo guardar la acción compartida en {self.path}: {exc}"
+            ) from exc
         return item
 
     def get(self, share_id: str) -> SharedAction:
@@ -198,12 +207,31 @@ class ActionShareStore:
 
 
 def actions_dir() -> Path:
+    candidates: list[Path] = []
     configured = os.getenv("AGENTEBC_ACTIONS_DIR", "").strip()
     if configured:
-        return Path(configured).expanduser().resolve()
+        candidates.append(Path(configured).expanduser())
     if _IIS_ACTIONS_DIR.parent.is_dir():
-        return _IIS_ACTIONS_DIR
-    return _DEFAULT_ACTIONS_DIR.resolve()
+        candidates.append(_IIS_ACTIONS_DIR)
+    candidates.append(Path.cwd() / "data" / "actions")
+    candidates.append(_DEFAULT_ACTIONS_DIR)
+    for path in candidates:
+        if _writable_dir(path):
+            return path.resolve()
+    fallback = Path.cwd() / "data" / "actions"
+    fallback.mkdir(parents=True, exist_ok=True)
+    return fallback.resolve()
+
+
+def _writable_dir(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
 
 
 def share_token() -> str:
@@ -263,7 +291,7 @@ def install_shared_action(
 
 
 def register_action_share_routes(app: Flask) -> None:
-    store = ActionShareStore(actions_dir())
+    store = ActionShareStore()
 
     @app.post("/api/actions/share")
     def share_action():
@@ -282,6 +310,8 @@ def register_action_share_routes(app: Flask) -> None:
             )
         except (ActionShareError, ValueError, TypeError, KeyError) as exc:
             return _json_error(str(exc), 400)
+        except OSError as exc:
+            return _json_error(f"No se pudo guardar la acción: {exc}", 500)
         return jsonify(item.as_dict()), 201
 
     @app.get("/api/actions/inbox")
