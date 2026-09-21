@@ -8,6 +8,7 @@ from pathlib import Path
 from flask import Flask, abort, jsonify, render_template, send_from_directory
 
 from . import __version__
+from .action_share import actions_dir, register_action_share_routes, share_token
 from .updater import ReleaseManifest
 
 _DEFAULT_RELEASES_DIR = Path(__file__).resolve().parents[2] / "packaging" / "releases"
@@ -98,9 +99,12 @@ def create_portal_app() -> Flask:
                     if manifest
                     else None
                 ),
+                "share_enabled": bool(share_token()),
+                "actions_dir": str(actions_dir()),
             }
         )
 
+    register_action_share_routes(app)
     return app
 
 

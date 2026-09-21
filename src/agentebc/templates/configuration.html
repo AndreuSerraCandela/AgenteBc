@@ -12,6 +12,7 @@
     header { background:#272727; color:white; padding:18px max(24px,calc((100% - 1100px)/2)); }
     header h1 { margin:0 0 5px; font-size:22px; }
     header a { color:#8cc8ff; }
+    header p { margin:6px 0 0; }
     main { max-width:1100px; margin:24px auto; padding:0 24px 48px; }
     section {
       background:white; border:1px solid #ddd; border-radius:6px;
@@ -30,6 +31,9 @@
       cursor:pointer; display:inline-block; font-weight:600; padding:9px 16px;
       text-decoration:none;
     }
+    button.secondary { background:#5a5a5a; }
+    .share-row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px; }
+    .share-row input { width:auto; flex:1; min-width:160px; }
     .cards { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
     .card { border:1px solid #ddd; border-radius:4px; padding:14px; }
     .card h3 { margin-top:0; }
@@ -50,10 +54,20 @@
 <body>
   <header>
     <h1>Configuración de tipos y acciones</h1>
-    <a href="/">Volver al diagnóstico</a>
+    <p>
+      <a href="/">Diagnóstico</a>
+      ·
+      <a href="/setup">Configuración general</a>
+      ·
+      <a href="/inbox">Buzón de acciones{% if inbox_count %} ({{ inbox_count }}){% endif %}</a>
+    </p>
   </header>
   <main>
-    {% if saved %}<p class="success">Configuración guardada.</p>{% endif %}
+    {% if saved == 'shared' %}
+      <p class="success">Acción compartida. El compañero la verá en el buzón hasta que la acepte.</p>
+    {% elif saved %}
+      <p class="success">Configuración guardada.</p>
+    {% endif %}
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
     <section>
@@ -79,6 +93,12 @@
                   editar
                 </a>
               </p>
+              <form method="post" action="/configuration/share" class="share-row">
+                <input type="hidden" name="type_id" value="{{ type.id }}">
+                <input type="hidden" name="action_id" value="{{ action.id }}">
+                <input name="note" placeholder="Nota para el compañero (opcional)">
+                <button type="submit" class="secondary">Compartir</button>
+              </form>
             {% endfor %}
           </article>
         {% endfor %}
