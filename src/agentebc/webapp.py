@@ -17,6 +17,8 @@ from flask import (
 )
 
 from . import __version__
+from .action_share import ActionShareConflict, ActionShareError, install_shared_action
+from .action_share_client import ActionShareClient, share_sender_name
 from .bc_client import BusinessCentralReadClient
 from .config import ConfigurationError, Settings
 from .env_store import (
@@ -92,6 +94,28 @@ def create_app(
             return document_reader().list_companies()
         except Exception:
             return [fallback] if fallback else []
+
+    def share_client() -> ActionShareClient:
+        return ActionShareClient.from_settings(current_settings())
+
+    @app.context_processor
+    def inject_nav():
+        configured = bool(current_settings().share_token)
+        count = None
+        if configured:
+            try:
+                count = ActionShareClient(
+                    base_url=current_settings().share_url
+                    or "https://agentebc.malla.es",
+                    token=current_settings().share_token or "",
+                    timeout_seconds=2.0,
+                ).pending_count()
+            except Exception:
+                count = None
+        return {
+            "inbox_count": count,
+            "share_configured": configured,
+        }
 
     @app.get("/api/app-info")
     def app_info():
@@ -543,11 +567,128 @@ def create_app(
                 error=str(exc),
             ), 400
 
+    @app.post("/configuration/share")
+    def share_configured_action():
+        type_id = request.form.get("type_id", "").strip()
+        action_id = request.form.get("action_id", "").strip()
+        note = request.form.get("note", "").strip()
+        try:
+            definition = registry.get(type_id)
+            action = definition.action(action_id)
+            share_client().share(
+                definition,
+                action,
+                from_user=share_sender_name(current_settings()),
+                note=note,
+            )
+            return redirect(
+                url_for("configuration", saved="shared", type_id=type_id)
+            )
+        except (ActionShareError, KeyError, ValueError) as exc:
+            return render_template(
+                "configuration.html",
+                document_types=registry.all(),
+                selected_type=type_id,
+                editing_type=None,
+                editing_action=None,
+                dialog_steps_text="",
+                field_edits_text="",
+                discovered_label="",
+                discovered_menu="",
+                saved=None,
+                error=str(exc),
+            ), 400
+
+    @app.get("/inbox")
+    def action_inbox():
+        error = request.args.get("error")
+        items: list[dict[str, object]] = []
+        if current_settings().share_token:
+            try:
+                items = [
+                    _inbox_item_view(item, registry)
+                    for item in share_client().inbox(status="pending")
+                ]
+            except ActionShareError as exc:
+                error = str(exc)
+        return render_template(
+            "inbox.html",
+            items=items,
+            saved=request.args.get("saved"),
+            error=error,
+        )
+
+    @app.post("/inbox/accept")
+    def accept_shared_action():
+        share_id = request.form.get("share_id", "").strip()
+        try:
+            payload = share_client().get(share_id)
+            install_shared_action(registry, payload)
+            try:
+                share_client().ack(
+                    share_id,
+                    status="accepted",
+                    acked_by=share_sender_name(current_settings()),
+                )
+            except ActionShareConflict:
+                return redirect(
+                    url_for(
+                        "action_inbox",
+                        saved="accepted-local",
+                    )
+                )
+            return redirect(url_for("action_inbox", saved="accepted"))
+        except (ActionShareError, KeyError, ValueError) as exc:
+            return redirect(url_for("action_inbox", error=str(exc)))
+
+    @app.post("/inbox/reject")
+    def reject_shared_action():
+        share_id = request.form.get("share_id", "").strip()
+        try:
+            share_client().ack(
+                share_id,
+                status="rejected",
+                acked_by=share_sender_name(current_settings()),
+            )
+            return redirect(url_for("action_inbox", saved="rejected"))
+        except (ActionShareError, KeyError, ValueError) as exc:
+            return redirect(url_for("action_inbox", error=str(exc)))
+
     @app.get("/reports/<path:filename>")
     def report_image(filename: str):
         return send_from_directory(reports_dir, filename)
 
     return app
+
+
+def _inbox_item_view(
+    item: dict[str, object],
+    registry: DocumentTypeRegistry,
+) -> dict[str, object]:
+    type_id = ""
+    action_id = ""
+    document_type = item.get("document_type")
+    action = item.get("action")
+    if isinstance(document_type, dict):
+        type_id = str(document_type.get("id") or "")
+    if isinstance(action, dict):
+        action_id = str(action.get("id") or "")
+    already_installed = False
+    type_missing = True
+    if type_id:
+        try:
+            current = registry.get(type_id)
+            type_missing = False
+            already_installed = any(
+                existing.id == action_id for existing in current.actions
+            )
+        except KeyError:
+            type_missing = True
+    return {
+        **item,
+        "already_installed": already_installed,
+        "type_missing": type_missing,
+    }
 
 
 def _parse_observed_at(value: str) -> datetime:

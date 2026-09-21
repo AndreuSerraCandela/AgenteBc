@@ -40,7 +40,15 @@
   <header>
     <h1>Configuración de AgenteBc</h1>
     <p>Conexión a Business Central, código remoto e IA. No hace falta editar el <code>.env</code> manualmente.</p>
-    {% if setup_complete %}<p><a href="/">Volver al diagnóstico</a></p>{% endif %}
+    {% if setup_complete %}
+      <p>
+        <a href="/">Diagnóstico</a>
+        ·
+        <a href="/configuration">Tipos y acciones</a>
+        ·
+        <a href="/inbox">Buzón de acciones{% if inbox_count %} ({{ inbox_count }}){% endif %}</a>
+      </p>
+    {% endif %}
   </header>
   <main>
     {% if saved %}<p class="success">Configuración guardada correctamente.</p>{% endif %}
@@ -99,6 +107,28 @@
           <div class="wide">
             <label for="AGENTEBC_SQL_ENV_FILE">Fichero SQL opcional</label>
             <input id="AGENTEBC_SQL_ENV_FILE" name="AGENTEBC_SQL_ENV_FILE" value="{{ values.AGENTEBC_SQL_ENV_FILE or '' }}" placeholder="C:\ruta\db.local.env">
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Compartir acciones</h2>
+        <p class="hint">
+          El portal <code>agentebc.malla.es</code> guarda recetas de acciones.
+          El compañero las ve en el buzón y solo se instalan si pulsa Aceptar.
+        </p>
+        <div class="grid">
+          <div class="wide">
+            <label for="AGENTEBC_SHARE_URL">URL del portal</label>
+            <input id="AGENTEBC_SHARE_URL" name="AGENTEBC_SHARE_URL" value="{{ values.AGENTEBC_SHARE_URL or 'https://agentebc.malla.es' }}">
+          </div>
+          <div>
+            <label for="AGENTEBC_SHARE_USER">Tu nombre al compartir</label>
+            <input id="AGENTEBC_SHARE_USER" name="AGENTEBC_SHARE_USER" value="{{ values.AGENTEBC_SHARE_USER or '' }}" placeholder="Consultor">
+          </div>
+          <div>
+            <label for="AGENTEBC_SHARE_TOKEN">Token compartido</label>
+            <input id="AGENTEBC_SHARE_TOKEN" name="AGENTEBC_SHARE_TOKEN" type="password" value="" placeholder="{% if values.AGENTEBC_SHARE_TOKEN %}Dejar vacío para no cambiar{% else %}El mismo token en todos los PCs{% endif %}">
           </div>
         </div>
       </section>

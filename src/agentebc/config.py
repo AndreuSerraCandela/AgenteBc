@@ -53,6 +53,9 @@ class Settings:
     google_ai_web_url: str | None
     bc_agent_url: str | None
     bc_agent_token: str | None
+    share_url: str | None
+    share_token: str | None
+    share_user: str | None
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -175,6 +178,12 @@ class Settings:
             google_ai_web_url=_optional("AGENTEBC_GOOGLE_AI_WEB_URL"),
             bc_agent_url=_optional("AGENTEBC_BC_AGENT_URL"),
             bc_agent_token=_optional("AGENTEBC_BC_AGENT_TOKEN"),
+            share_url=(
+                _optional("AGENTEBC_SHARE_URL")
+                or "https://agentebc.malla.es"
+            ),
+            share_token=_optional("AGENTEBC_SHARE_TOKEN"),
+            share_user=_optional("AGENTEBC_SHARE_USER"),
         )
         settings.validate()
         return settings
@@ -216,6 +225,10 @@ class Settings:
                 "AGENTEBC_BC_AGENT_TOKEN es obligatorio si se configura "
                 "AGENTEBC_BC_AGENT_URL"
             )
+        if self.share_url:
+            parsed = urlparse(self.share_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise ConfigurationError("AGENTEBC_SHARE_URL no es una URL válida")
         if self.ai_provider == "lm_studio" and not self.lm_studio_url:
             raise ConfigurationError(
                 "AGENTEBC_LM_STUDIO_URL es obligatorio si "
@@ -282,6 +295,9 @@ class Settings:
             "google_ai_web_url": self.google_ai_web_url,
             "bc_agent_configured": bool(self.bc_agent_url and self.bc_agent_token),
             "bc_agent_url": self.bc_agent_url,
+            "share_configured": bool(self.share_token),
+            "share_url": self.share_url,
+            "share_user": self.share_user,
         }
 
 

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buzón de acciones · Agente BC</title>
+  <style>
+    body {
+      background:#f5f5f5; color:#242424; font-family:"Segoe UI",sans-serif;
+      margin:0;
+    }
+    header { background:#272727; color:white; padding:18px max(24px,calc((100% - 1100px)/2)); }
+    header h1 { margin:0 0 5px; font-size:22px; }
+    header a { color:#8cc8ff; }
+    main { max-width:1100px; margin:24px auto; padding:0 24px 48px; }
+    section {
+      background:white; border:1px solid #ddd; border-radius:6px;
+      margin-bottom:18px; padding:22px;
+    }
+    h2 { margin-top:0; }
+    .card { border:1px solid #ddd; border-radius:4px; padding:16px; margin-bottom:12px; }
+    .card h3 { margin:0 0 8px; }
+    .meta { color:#555; font-size:14px; }
+    .actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+    button,.button {
+      background:#0067b8; border:0; border-radius:3px; color:white;
+      cursor:pointer; display:inline-block; font-weight:600; padding:9px 16px;
+      text-decoration:none;
+    }
+    button.secondary,.button.secondary { background:#5a5a5a; }
+    .error { background:#fde7e9; border-left:5px solid #a80000; padding:12px; }
+    .success { background:#dff6dd; border-left:5px solid #107c10; padding:12px; }
+    .notice { color:#555; font-size:14px; }
+    .warn { background:#fff8e6; border-left:5px solid #c19c00; padding:12px; }
+    code { background:#f3f3f3; padding:2px 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Buzón de acciones</h1>
+    <p>
+      <a href="/">Diagnóstico</a>
+      ·
+      <a href="/setup">Configuración general</a>
+      ·
+      <a href="/configuration">Tipos y acciones</a>
+    </p>
+  </header>
+  <main>
+    {% if saved == 'accepted' %}
+      <p class="success">Acción aceptada e instalada en este equipo.</p>
+    {% elif saved == 'accepted-local' %}
+      <p class="success">Acción instalada en este equipo. El acuse del portal ya estaba registrado.</p>
+    {% elif saved == 'rejected' %}
+      <p class="success">Acción rechazada. No se ha instalado nada.</p>
+    {% endif %}
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+    <section>
+      <h2>Nuevas acciones</h2>
+      {% if not share_configured %}
+        <p class="warn">
+          Configura el token de compartir en
+          <a href="/setup">Configuración general</a>
+          para ver las acciones que te envían los compañeros.
+        </p>
+      {% elif items %}
+        <p class="notice">
+          Aceptar instala solo la receta de la acción en este equipo.
+          No se ejecuta ni se registra nada en Business Central.
+        </p>
+        {% for item in items %}
+          <article class="card">
+            <h3>{{ item.action.label if item.action else 'Acción' }}</h3>
+            <p class="meta">
+              Tipo: <strong>{{ item.document_type.label if item.document_type else '?' }}</strong>
+              · <code>{{ item.document_type.id if item.document_type else '' }}</code>
+              / <code>{{ item.action.id if item.action else '' }}</code><br>
+              Clasificación: <strong>{{ item.action.safety if item.action else '?' }}</strong><br>
+              De {{ item.from_user }} · {{ item.created_at }}
+            </p>
+            {% if item.note %}<p>{{ item.note }}</p>{% endif %}
+            {% if item.type_missing %}
+              <p class="warn">
+                Este equipo no tiene el tipo de ficha. Al aceptar se creará
+                el tipo y esta acción.
+              </p>
+            {% elif item.already_installed %}
+              <p class="warn">
+                Ya tienes esta acción. Aceptar la actualizará con la receta recibida.
+              </p>
+            {% endif %}
+            <div class="actions">
+              <form method="post" action="/inbox/accept">
+                <input type="hidden" name="share_id" value="{{ item.id }}">
+                <button type="submit">Aceptar e instalar</button>
+              </form>
+              <form method="post" action="/inbox/reject">
+                <input type="hidden" name="share_id" value="{{ item.id }}">
+                <button type="submit" class="secondary">Rechazar</button>
+              </form>
+            </div>
+          </article>
+        {% endfor %}
+      {% else %}
+        <p class="notice">No hay acciones nuevas pendientes de aceptar.</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>

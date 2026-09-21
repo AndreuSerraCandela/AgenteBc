@@ -7,6 +7,8 @@ src/agente_bc.egg-info/entry_points.txt
 src/agente_bc.egg-info/requires.txt
 src/agente_bc.egg-info/top_level.txt
 src/agentebc/__init__.py
+src/agentebc/action_share.py
+src/agentebc/action_share_client.py
 src/agentebc/ai_web_cdp.py
 src/agentebc/bc_agent_source.py
 src/agentebc/bc_client.py
@@ -35,10 +37,12 @@ src/agentebc/updater.py
 src/agentebc/web_preview.py
 src/agentebc/webapp.py
 src/agentebc/templates/configuration.html
+src/agentebc/templates/inbox.html
 src/agentebc/templates/index.html
 src/agentebc/templates/portal.html
 src/agentebc/templates/setup.html
 tests/test_action_click.py
+tests/test_action_share.py
 tests/test_ai_config.py
 tests/test_ai_web_cdp.py
 tests/test_bc_agent_source.py
@@ -52,6 +56,7 @@ tests/test_documents.py
 tests/test_env_store.py
 tests/test_evidence_enrichment.py
 tests/test_field_edits.py
+tests/test_inbox_routes.py
 tests/test_license_catalog.py
 tests/test_llm_conclusions.py
 tests/test_microsoft_packages.py

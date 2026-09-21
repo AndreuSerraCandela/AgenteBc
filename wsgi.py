@@ -39,6 +39,7 @@ try:
         handle.write(f"Project dir: {project_dir}\n")
         handle.write(f"Python path: {sys.executable}\n")
         handle.write(f"Releases dir: {os.getenv('AGENTEBC_RELEASES_DIR', '(default)')}\n")
+        handle.write(f"Actions dir: {os.getenv('AGENTEBC_ACTIONS_DIR', '(default)')}\n")
 except Exception:
     pass
 

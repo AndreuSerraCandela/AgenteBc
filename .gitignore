@@ -12,3 +12,4 @@ reports/
 logs/
 .cache/
 *.log
+packaging/actions/

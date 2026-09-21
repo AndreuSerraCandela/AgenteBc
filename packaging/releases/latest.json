@@ -1,7 +1,7 @@
 {
-  "version": "0.2.1",
+  "version": "0.2.2",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.1-setup.exe",
-  "sha256": "25712529bc9533997de0d5d27b6c00e4a31e5990400f87a5801960b3e50cbd06",
-  "release_notes": "Corrige el cierre al iniciar en un PC nuevo. La configuración inicial ahora es segura y los errores de arranque muestran un diálogo y se guardan en un registro."
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.2-setup.exe",
+  "sha256": "3b1fdf6092dae6621b30329fb6851fdc59e3069436fddae84cb50e505352ef7f",
+  "release_notes": "Compartir acciones entre consultores: envío desde configuración, buzón de nuevas acciones y aceptación e instalación local. El compañero debe aceptar; no se instala nada automáticamente."
 }

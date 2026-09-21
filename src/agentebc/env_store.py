@@ -5,7 +5,14 @@ from pathlib import Path
 
 from .config import ConfigurationError, Settings
 
-_PASSWORD_KEYS = frozenset({"AGENTEBC_PASSWORD", "AGENTEBC_DEEPSEEK_API_KEY", "AGENTEBC_BC_AGENT_TOKEN"})
+_PASSWORD_KEYS = frozenset(
+    {
+        "AGENTEBC_PASSWORD",
+        "AGENTEBC_DEEPSEEK_API_KEY",
+        "AGENTEBC_BC_AGENT_TOKEN",
+        "AGENTEBC_SHARE_TOKEN",
+    }
+)
 _SECRET_PLACEHOLDER = "********"
 
 _SETUP_KEYS = (
@@ -36,6 +43,9 @@ _SETUP_KEYS = (
     "AGENTEBC_LICENSE_URL",
     "AGENTEBC_LICENSE_TOKEN",
     "AGENTEBC_LICENSE_CLIENT",
+    "AGENTEBC_SHARE_URL",
+    "AGENTEBC_SHARE_TOKEN",
+    "AGENTEBC_SHARE_USER",
 )
 
 _ENV_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
