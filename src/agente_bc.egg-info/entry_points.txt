@@ -1,3 +1,5 @@
 [console_scripts]
 agentebc = agentebc.cli:main
+agentebc-desktop = agentebc.desktop:main
+agentebc-portal = agentebc.portal:main
 agentebc-web = agentebc.webapp:main

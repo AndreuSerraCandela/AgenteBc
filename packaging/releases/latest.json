@@ -1,0 +1,7 @@
+{
+  "version": "0.2.0",
+  "min_version": "0.2.0",
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.0-setup.exe",
+  "sha256": "c19072b65dc46cd083605d73b659458d66c7f9a66555e67f93d27ae9273972c1",
+  "release_notes": "Primera versión de escritorio con WebView2, configurador visual, CDP local para Google Modo IA y DeepSeek web, y actualizaciones automáticas."
+}

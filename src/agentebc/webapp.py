@@ -16,8 +16,17 @@ from flask import (
     url_for,
 )
 
+from . import __version__
 from .bc_client import BusinessCentralReadClient
 from .config import ConfigurationError, Settings
+from .env_store import (
+    apply_env_updates,
+    collect_setup_updates,
+    is_setup_complete,
+    mask_secret_values,
+    read_env_values,
+)
+from .paths import AppPaths, is_desktop_mode
 from .diagnosis import build_diagnostic_service
 from .license_catalog import ExtensionCatalog
 from .document_types import (
@@ -32,7 +41,9 @@ from .document_types import (
 )
 from .documents import DocumentNotFoundError, DocumentReference, DocumentReader
 from .evidence_enrichment import EvidenceItem, enrich_from_message
-from .llm_conclusions import LmStudioClient, request_ai_conclusion
+from .deepseek_web import DeepSeekWebError
+from .google_ai_web import GoogleAiWebError
+from .llm_conclusions import _WEB_AI_PROVIDERS, build_llm_client, request_ai_conclusion
 from .models import DiagnosticReport, Evidence, Incident, ProposedSolution, SourceMatch
 from .sql_reader import SqlReadOnlyClient
 from .web_preview import (
@@ -46,24 +57,35 @@ from .web_preview import (
 _preview_lock = threading.Lock()
 
 
-def create_app(settings: Settings | None = None) -> Flask:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    app_paths: AppPaths | None = None,
+) -> Flask:
     package_dir = Path(__file__).resolve().parent
+    paths = app_paths or AppPaths.resolve()
     app = Flask(
         __name__,
         template_folder=str(package_dir / "templates"),
         static_folder=str(package_dir / "static"),
     )
-    app.config["TEMPLATES_AUTO_RELOAD"] = True
+    app.config["TEMPLATES_AUTO_RELOAD"] = not is_desktop_mode()
     app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
-    configured_settings = settings or Settings.from_environment()
-    project_root = Path(__file__).resolve().parents[2]
-    reports_dir = project_root / "reports"
-    registry = DocumentTypeRegistry(
-        project_root / "config" / "document_types.json"
-    )
+    settings_state = {"current": settings or Settings.from_environment()}
+
+    def current_settings() -> Settings:
+        return settings_state["current"]
+
+    def reload_settings() -> Settings:
+        settings_state["current"] = Settings.load_fresh(paths.env_file)
+        return settings_state["current"]
+
+    reports_dir = paths.reports_dir
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    registry = DocumentTypeRegistry(paths.document_types_file)
 
     def document_reader() -> DocumentReader:
-        return DocumentReader(BusinessCentralReadClient(configured_settings))
+        return DocumentReader(BusinessCentralReadClient(current_settings()))
 
     def load_companies(fallback: str | None = None) -> list[str]:
         try:
@@ -71,8 +93,74 @@ def create_app(settings: Settings | None = None) -> Flask:
         except Exception:
             return [fallback] if fallback else []
 
+    @app.get("/api/app-info")
+    def app_info():
+        return jsonify(
+            {
+                "name": "AgenteBc",
+                "version": __version__,
+                **paths.summary(),
+            }
+        )
+
+    def setup_form_values() -> dict[str, str]:
+        return mask_secret_values(read_env_values(paths.env_file))
+
+    @app.get("/setup")
+    def app_setup():
+        setup_complete = is_setup_complete(current_settings())
+        return render_template(
+            "setup.html",
+            values=setup_form_values(),
+            env_file=str(paths.env_file),
+            setup_complete=setup_complete,
+            saved=request.args.get("saved"),
+            error=request.args.get("error"),
+            test_ok=request.args.get("test_ok"),
+        )
+
+    @app.post("/setup")
+    def app_setup_save():
+        updates = collect_setup_updates(request.form)
+        action = request.form.get("action", "save")
+        try:
+            apply_env_updates(paths.env_file, updates)
+            reload_settings()
+        except (ConfigurationError, ValueError) as exc:
+            return render_template(
+                "setup.html",
+                values={**setup_form_values(), **updates},
+                env_file=str(paths.env_file),
+                setup_complete=is_setup_complete(current_settings()),
+                error=str(exc),
+            ), 400
+
+        if action == "test":
+            try:
+                companies = document_reader().list_companies()
+                message = (
+                    f"Conexión correcta. Empresas encontradas: {len(companies)}"
+                    if companies
+                    else "Conexión correcta, pero no se devolvieron empresas."
+                )
+                return redirect(
+                    url_for("app_setup", saved="1", test_ok=message)
+                )
+            except Exception as exc:
+                return render_template(
+                    "setup.html",
+                    values=setup_form_values(),
+                    env_file=str(paths.env_file),
+                    setup_complete=is_setup_complete(current_settings()),
+                    error=f"No se pudo conectar a Business Central: {exc}",
+                ), 400
+
+        return redirect(url_for("app_setup", saved="1"))
+
     @app.get("/")
     def index():
+        if is_desktop_mode() and not is_setup_complete(current_settings()):
+            return redirect(url_for("app_setup"))
         companies = load_companies()
         connection_error = None
         if not companies:
@@ -81,7 +169,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             "index.html",
             companies=companies,
             document_types=registry.all(),
-            default_company=configured_settings.company,
+            default_company=current_settings().company,
             connection_error=connection_error,
             form={},
             document=None,
@@ -91,6 +179,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             ai_conclusion=None,
             ai_pending=False,
             ai_request=None,
+            ai_provider=current_settings().ai_provider,
             discovered_actions=None,
             error=None,
         )
@@ -136,7 +225,7 @@ def create_app(settings: Settings | None = None) -> Flask:
                 raise PreviewError("Ya hay otra vista previa en ejecución")
             try:
                 preview_result = BusinessCentralWebPreview(
-                    configured_settings,
+                    current_settings(),
                     reports_dir=reports_dir,
                 ).run(document, definition, action)
             finally:
@@ -145,8 +234,8 @@ def create_app(settings: Settings | None = None) -> Flask:
             if preview_result.messages:
                 primary_message = primary_preview_message(preview_result.messages)
                 diagnostic_report = build_diagnostic_service(
-                    configured_settings,
-                    _extension_catalog(configured_settings),
+                    current_settings(),
+                    _extension_catalog(current_settings()),
                 ).diagnose(
                     Incident(
                         error_text=primary_message.description,
@@ -166,9 +255,9 @@ def create_app(settings: Settings | None = None) -> Flask:
                 )
                 sql_client = (
                     SqlReadOnlyClient(
-                        configured_settings.sql_connection_string
+                        current_settings().sql_connection_string
                     )
-                    if configured_settings.sql_connection_string
+                    if current_settings().sql_connection_string
                     else None
                 )
                 enrichment_items = enrich_from_message(
@@ -181,7 +270,7 @@ def create_app(settings: Settings | None = None) -> Flask:
                         item.as_dict() for item in enrichment_items
                     ]
                 case_label = f"{definition.label} / {action.label}"
-                if configured_settings.lm_studio_url and diagnostic_report:
+                if current_settings().ai_enabled and diagnostic_report:
                     ai_pending = True
                     ai_request = _build_ai_request_payload(
                         case_label=case_label,
@@ -205,7 +294,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             "index.html",
             companies=companies,
             document_types=registry.all(),
-            default_company=configured_settings.company,
+            default_company=current_settings().company,
             connection_error=None,
             form=form,
             document=asdict(document) if document else None,
@@ -217,25 +306,43 @@ def create_app(settings: Settings | None = None) -> Flask:
             ai_conclusion=ai_conclusion,
             ai_pending=ai_pending,
             ai_request=ai_request,
+            ai_provider=current_settings().ai_provider,
             discovered_actions=None,
             error=error,
         )
 
     @app.post("/preview/ai-conclusions")
     def preview_ai_conclusions():
-        if not configured_settings.lm_studio_url:
-            return jsonify({"error": "LM Studio no está configurado"}), 400
+        if not current_settings().ai_enabled:
+            return jsonify({"error": "La IA no está configurada"}), 400
         payload = request.get_json(silent=True)
         if not payload:
             return jsonify({"error": "Falta el cuerpo de la solicitud"}), 400
         try:
             result = _request_ai_conclusion_from_payload(
                 payload,
-                configured_settings,
+                current_settings(),
             )
         except (KeyError, TypeError, ValueError) as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify(result.as_dict())
+
+    @app.post("/preview/ai-focus-external")
+    def focus_external_ai_tab():
+        if current_settings().ai_provider not in _WEB_AI_PROVIDERS:
+            return jsonify({"error": "Solo disponible con proveedores web"}), 400
+        client = build_llm_client(current_settings())
+        if not getattr(client, "cdp_available", False):
+            return jsonify({"error": "Requiere AGENTEBC_AI_WEB_CDP_URL"}), 400
+        try:
+            client.focus_chat_tab()
+        except (DeepSeekWebError, GoogleAiWebError) as exc:
+            return jsonify({"error": str(exc)}), 409
+        return jsonify({"ok": True})
+
+    @app.post("/preview/ai-focus-deepseek")
+    def focus_deepseek_tab():
+        return focus_external_ai_tab()
 
     @app.post("/explore-actions")
     def explore_actions():
@@ -262,7 +369,7 @@ def create_app(settings: Settings | None = None) -> Flask:
                 raise PreviewError("Ya hay otra sesión de navegador en ejecución")
             try:
                 exploration = BusinessCentralActionExplorer(
-                    configured_settings,
+                    current_settings(),
                     reports_dir=reports_dir,
                 ).run(document, definition)
             finally:
@@ -281,7 +388,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             "index.html",
             companies=load_companies(company),
             document_types=registry.all(),
-            default_company=configured_settings.company,
+            default_company=current_settings().company,
             connection_error=None,
             form=form,
             document=asdict(document) if document else None,
@@ -291,6 +398,7 @@ def create_app(settings: Settings | None = None) -> Flask:
             ai_conclusion=None,
             ai_pending=False,
             ai_request=None,
+            ai_provider=current_settings().ai_provider,
             discovered_actions=(
                 asdict(exploration) if exploration else None
             ),
@@ -487,13 +595,8 @@ def _request_ai_conclusion_from_payload(
     enrichments = tuple(
         EvidenceItem(**item) for item in payload.get("enrichments", [])
     )
-    model = settings.lm_studio_model or "qwen2.5-32b-instruct"
     return request_ai_conclusion(
-        LmStudioClient(
-            settings.lm_studio_url,
-            model=model,
-            timeout_seconds=settings.request_timeout_seconds,
-        ),
+        build_llm_client(settings),
         case_label=str(payload["case_label"]),
         document=document,
         message=message,
@@ -557,7 +660,13 @@ def main() -> None:
         app = create_app()
     except ConfigurationError as exc:
         raise SystemExit(f"Error de configuración: {exc}") from exc
-    app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=True, threaded=True)
+    app.run(
+        host="127.0.0.1",
+        port=5000,
+        debug=not is_desktop_mode(),
+        use_reloader=not is_desktop_mode(),
+        threaded=True,
+    )
 
 
 if __name__ == "__main__":
