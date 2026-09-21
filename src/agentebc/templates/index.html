@@ -122,6 +122,16 @@
     @keyframes ai-spin {
       to { transform: rotate(360deg); }
     }
+    .ask-banner {
+      background: #fff4ce;
+      border-left: 5px solid #c19c00;
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .ask-banner p { margin: 0; font-weight: 600; }
     img { border: 1px solid #ccc; max-width: 100%; }
     @media (max-width: 760px) {
       .grid { grid-template-columns: 1fr; }
@@ -143,6 +153,10 @@
     <p id="app-version" hidden style="font-size:12px;color:#aaa"></p>
   </header>
   <main>
+    <div id="run-status" class="ask-banner" hidden>
+      <div class="ai-pending-spinner" aria-hidden="true"></div>
+      <p id="run-status-text">Ejecutando acción…</p>
+    </div>
     <section>
       <h2>Nueva comprobación</h2>
       {% if connection_error %}
@@ -533,6 +547,47 @@
     }
 
     loadAppInfo();
+
+    const previewForm = document.querySelector('form[action="/preview"]');
+    const runStatus = document.getElementById("run-status");
+    const runStatusText = document.getElementById("run-status-text");
+    if (previewForm && runStatus && runStatusText) {
+      previewForm.addEventListener("submit", async (event) => {
+        const submitter = event.submitter;
+        if (submitter && submitter.getAttribute("formaction")) {
+          return;
+        }
+        event.preventDefault();
+        runStatus.hidden = false;
+        runStatusText.textContent = "Ejecutando acción…";
+        try {
+          const response = await fetch("/preview", {
+            method: "POST",
+            headers: { "X-AgenteBc-Async": "1" },
+            body: new FormData(previewForm),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(data.error || "No se pudo iniciar la acción");
+          }
+          for (;;) {
+            await new Promise((resolve) => window.setTimeout(resolve, 500));
+            const statusResponse = await fetch("/api/preview-status");
+            const status = await statusResponse.json();
+            if (status.state === "asking" && status.prompt) {
+              runStatusText.textContent = `${status.prompt} en Business Central y pulse Aceptar.`;
+            } else if (status.state === "running") {
+              runStatusText.textContent = "Ejecutando acción…";
+            } else if (status.state === "done") {
+              window.location.href = data.result_url || "/preview/last";
+              return;
+            }
+          }
+        } catch (error) {
+          runStatusText.textContent = error.message || "Error al ejecutar la acción";
+        }
+      });
+    }
   </script>
 </body>
 </html>

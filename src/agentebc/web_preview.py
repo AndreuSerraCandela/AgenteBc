@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,9 @@ from .documents import DocumentReference
 
 class PreviewError(RuntimeError):
     pass
+
+
+ASK_DIALOG_TIMEOUT_SECONDS = 300.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,7 +93,13 @@ class ActionExplorationResult:
 class BusinessCentralWebPreview:
     """Automatiza exclusivamente la acción estándar Vista previa de registro."""
 
-    def __init__(self, settings: Settings, *, reports_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        reports_dir: Path | None = None,
+        on_prompt: Callable[[str | None], None] | None = None,
+    ) -> None:
         if not settings.odata_base_url:
             raise ValueError("Falta AGENTEBC_ODATA_BASE_URL")
         if not settings.username or not settings.password:
@@ -99,6 +109,11 @@ class BusinessCentralWebPreview:
         self._reports_dir = reports_dir or (
             Path(__file__).resolve().parents[2] / "reports"
         )
+        self._on_prompt = on_prompt
+
+    def _set_prompt(self, text: str | None) -> None:
+        if self._on_prompt is not None:
+            self._on_prompt(text)
 
     def run(
         self,
@@ -681,9 +696,15 @@ class BusinessCentralWebPreview:
         action: ActionDefinition,
         completed: set[int],
         *,
-        timeout_seconds: float = 15.0,
+        timeout_seconds: float | None = None,
     ) -> bool:
-        deadline = time.monotonic() + timeout_seconds
+        ask_steps = sum(1 for step in action.dialog_steps if step.is_ask)
+        wait_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else 15.0 + ask_steps * ASK_DIALOG_TIMEOUT_SECONDS
+        )
+        deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
             if self._handle_dialogs(page, action, completed, max_clicks=2):
                 if len(completed) >= len(action.dialog_steps):
@@ -721,6 +742,18 @@ class BusinessCentralWebPreview:
             frame = self._find_dialog_frame(page, step)
             if frame is None:
                 return False
+            if step.is_ask:
+                self._set_prompt(step.ask_prompt())
+                try:
+                    if not self._wait_ask_dialog_closed(page, step):
+                        raise PreviewError(
+                            "Se agotó el tiempo esperando que "
+                            f"{step.ask_prompt().casefold()}"
+                        )
+                finally:
+                    self._set_prompt(None)
+                completed.add(index)
+                return True
             if step.selection:
                 self._select_dialog_option(frame, step.selection)
             button = self._dialog_button_locator(frame, step.button)
@@ -729,6 +762,20 @@ class BusinessCentralWebPreview:
             button.evaluate("(element) => element.click()")
             completed.add(index)
             return True
+        return False
+
+    def _wait_ask_dialog_closed(
+        self,
+        page: Page,
+        step: DialogStep,
+        *,
+        timeout_seconds: float = ASK_DIALOG_TIMEOUT_SECONDS,
+    ) -> bool:
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            if self._find_dialog_frame(page, step) is None:
+                return True
+            page.wait_for_timeout(400)
         return False
 
     def _find_dialog_frame(

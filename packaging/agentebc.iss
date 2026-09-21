@@ -2,7 +2,7 @@
 ; Compilar tras generar dist\AgenteBc.exe con build-desktop.ps1
 
 #define MyAppName "AgenteBc"
-#define MyAppVersion "0.2.4"
+#define MyAppVersion "0.2.5"
 #define MyAppPublisher "Malla Publicidad"
 #define MyAppURL "https://agentebc.malla.es"
 #define MyAppExeName "AgenteBc.exe"
