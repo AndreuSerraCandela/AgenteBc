@@ -20,6 +20,7 @@ SHARE_ID_PATTERN = re.compile(
 VALID_STATUSES = frozenset({"pending", "accepted", "rejected"})
 _ACK_STATUSES = frozenset({"accepted", "rejected"})
 _DEFAULT_ACTIONS_DIR = Path(__file__).resolve().parents[2] / "packaging" / "actions"
+_IIS_ACTIONS_DIR = Path(r"C:\inetpub\data\AgenteBc\actions")
 _MAX_NOTE = 500
 _MAX_NAME = 80
 
@@ -200,6 +201,8 @@ def actions_dir() -> Path:
     configured = os.getenv("AGENTEBC_ACTIONS_DIR", "").strip()
     if configured:
         return Path(configured).expanduser().resolve()
+    if _IIS_ACTIONS_DIR.parent.is_dir():
+        return _IIS_ACTIONS_DIR
     return _DEFAULT_ACTIONS_DIR.resolve()
 
 
