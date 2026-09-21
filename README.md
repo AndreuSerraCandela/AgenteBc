@@ -54,8 +54,8 @@ python -m pip install -e ".[desktop]"
 agentebc-desktop
 ```
 
-Build del instalador Windows, actualizaciones y despliegue en
-`docs/DESKTOP.md`.
+Build del instalador Windows, actualizaciones y despliegue IIS del portal en
+`docs/DESKTOP.md` (`web.config`, `install_web_iis.bat`).
 
 ## Configuración
 

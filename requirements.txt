@@ -1,0 +1,4 @@
+# Dependencias del portal IIS (Deploy-App.ps1 usa este fichero).
+# Misma lista que requirements_web.txt; sin Playwright ni escritorio.
+flask>=3.1,<4
+waitress>=2.1.0
