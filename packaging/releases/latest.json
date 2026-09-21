@@ -1,7 +1,7 @@
 {
-  "version": "0.2.3",
+  "version": "0.2.4",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.3-setup.exe",
-  "sha256": "1eff54e64d8a14f0fe96dd8e3f20ab188493338a00654b5e82b989e76584a1bf",
-  "release_notes": "Registrar pedidos de compra: abre Más opciones y recorre Acciones > Registro > Otros > Registrar..."
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.4-setup.exe",
+  "sha256": "b4ca550b130fca0a6a6c1ba8d2e037626386ac036b71d634a8d8b78dcc8edc65",
+  "release_notes": "Corrige Registrar en pedidos: pulsa Más opciones (Mostrar acciones secundarias), el Acciones del documento y Otros aunque no tenga aria-label."
 }
