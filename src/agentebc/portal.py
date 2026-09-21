@@ -9,7 +9,6 @@ from flask import Flask, abort, jsonify, render_template, send_from_directory
 
 from . import __version__
 from .action_share import actions_dir, register_action_share_routes, share_token
-from .config import load_portal_environment
 from .updater import ReleaseManifest
 
 _DEFAULT_RELEASES_DIR = Path(__file__).resolve().parents[2] / "packaging" / "releases"
@@ -44,7 +43,7 @@ def installer_available(manifest: ReleaseManifest) -> bool:
 
 
 def create_portal_app() -> Flask:
-    load_portal_environment()
+    _load_portal_environment()
     package_dir = Path(__file__).resolve().parent
     app = Flask(
         __name__,
@@ -134,6 +133,33 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Releases: {releases_dir()}")
     app.run(host=args.host, port=args.port, debug=False, threaded=True)
     return 0
+
+
+def _load_portal_environment() -> None:
+    """Carga el .env del sitio IIS sin importar Playwright ni Settings."""
+    configured = os.getenv("AGENTEBC_ENV_FILE", "").strip()
+    candidates = [Path(configured).expanduser()] if configured else []
+    candidates.append(Path.cwd() / ".env")
+    seen: set[Path] = set()
+    for path in candidates:
+        resolved = path.resolve() if path.exists() else path
+        if resolved in seen or not path.is_file():
+            continue
+        seen.add(resolved)
+        for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            name, value = line.split("=", 1)
+            name = name.strip()
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1]
+            if name:
+                os.environ.setdefault(name, value)
+        return
 
 
 if __name__ == "__main__":

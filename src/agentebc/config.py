@@ -331,23 +331,6 @@ def _optional(name: str, *, strip: bool = True) -> str | None:
     return value or None
 
 
-def load_portal_environment() -> None:
-    """Carga el .env del portal sin pisar variables ya definidas en IIS."""
-    configured = os.getenv("AGENTEBC_ENV_FILE", "").strip()
-    candidates = []
-    if configured:
-        candidates.append(Path(configured).expanduser())
-    candidates.append(Path.cwd() / ".env")
-    seen: set[Path] = set()
-    for path in candidates:
-        resolved = path.resolve() if path.exists() else path
-        if resolved in seen or not path.is_file():
-            continue
-        seen.add(resolved)
-        _load_env_file(path, override=False)
-        return
-
-
 def _load_env_file(path: Path, *, override: bool = False) -> None:
     if not path.is_file():
         return
