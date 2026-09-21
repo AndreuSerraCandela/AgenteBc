@@ -26,13 +26,51 @@ _INSTALLER_NAME = re.compile(
 )
 _MAX_INSTALLER_BYTES = 100 * 1024 * 1024
 _PUBLIC_RELEASES_BASE = "https://agentebc.malla.es/releases"
+_releases_dir_cache: tuple[str, str] | None = None
 
 
 def releases_dir() -> Path:
+    global _releases_dir_cache
     configured = os.getenv("AGENTEBC_RELEASES_DIR", "").strip()
-    if configured:
-        return Path(configured).expanduser().resolve()
-    return _DEFAULT_RELEASES_DIR.resolve()
+    cache_key = f"{configured}|{Path.cwd()}"
+    if _releases_dir_cache and _releases_dir_cache[0] == cache_key:
+        return Path(_releases_dir_cache[1])
+    preferred = (
+        Path(configured).expanduser() if configured else _DEFAULT_RELEASES_DIR
+    )
+    fallback = Path.cwd() / "data" / "releases"
+    chosen = preferred
+    for candidate in (preferred, fallback, _DEFAULT_RELEASES_DIR):
+        if _releases_dir_writable(candidate):
+            chosen = candidate
+            break
+    resolved = chosen.resolve()
+    if resolved != preferred.resolve():
+        _seed_release_manifest(resolved, preferred)
+    _releases_dir_cache = (cache_key, str(resolved))
+    return resolved
+
+
+def _releases_dir_writable(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _seed_release_manifest(dest: Path, source: Path) -> None:
+    target = dest / "latest.json"
+    seed = source / "latest.json"
+    if target.is_file() or not seed.is_file():
+        return
+    try:
+        target.write_bytes(seed.read_bytes())
+    except OSError:
+        return
 
 
 def load_release_manifest() -> ReleaseManifest | None:
