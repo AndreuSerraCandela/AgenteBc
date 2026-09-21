@@ -520,8 +520,7 @@ class BusinessCentralWebPreview:
         root.evaluate("(element) => element.click()")
         frame.page.wait_for_timeout(300)
         for part in parts[1:]:
-            item = BusinessCentralWebPreview._menuitem_locator(frame, part)
-            item.wait_for(state="visible", timeout=10_000)
+            item = BusinessCentralWebPreview._wait_menuitem(frame, part)
             item.evaluate("(element) => element.click()")
             frame.page.wait_for_timeout(300)
 
@@ -555,17 +554,18 @@ class BusinessCentralWebPreview:
 
     @staticmethod
     def _expand_action_bar(frame: Frame, needed_label: str | None = None) -> None:
-        if needed_label and BusinessCentralWebPreview._toolbar_button_visible(
-            frame,
-            needed_label,
-        ):
+        del needed_label
+        if BusinessCentralWebPreview._toolbar_button_visible(frame, "Relacionado"):
             return
-        for label in ACTION_BAR_EXPAND_LABELS:
-            button = BusinessCentralWebPreview._toolbar_button_locator(frame, label)
+        for selector in action_bar_expand_selectors():
+            button = frame.locator(selector)
             try:
-                if not button.count() or not button.is_visible():
+                if not button.count():
                     continue
-                button.evaluate("(element) => element.click()")
+                target = button.first
+                if not target.is_visible():
+                    continue
+                target.evaluate("(element) => element.click()")
                 frame.page.wait_for_timeout(400)
                 return
             except Exception:
@@ -581,6 +581,21 @@ class BusinessCentralWebPreview:
 
     @staticmethod
     def _toolbar_button_locator(frame: Frame, label: str) -> Locator:
+        related = frame.locator(
+            'button[aria-label="Relacionado"], button[aria-label="Related"]'
+        )
+        try:
+            if related.count() and related.first.is_visible():
+                for candidate in menuitem_label_aliases(label):
+                    sibling = frame.locator(
+                        'button[aria-label="Relacionado"], button[aria-label="Related"]'
+                    ).locator(
+                        f'xpath=preceding::button[@aria-label="{_css_string(candidate)}"][1]'
+                    )
+                    if sibling.count():
+                        return sibling.first
+        except Exception:
+            pass
         for candidate in menuitem_label_aliases(label):
             locator = frame.locator(
                 f'button[aria-label="{_css_string(candidate)}"]'
@@ -595,19 +610,52 @@ class BusinessCentralWebPreview:
         ).first
 
     @staticmethod
+    def _wait_menuitem(frame: Frame, label: str, timeout_ms: int = 10_000) -> Locator:
+        deadline = time.monotonic() + timeout_ms / 1000
+        while time.monotonic() < deadline:
+            found = BusinessCentralWebPreview._first_visible_menuitem(frame, label)
+            if found is not None:
+                return found
+            frame.page.wait_for_timeout(150)
+        fallback = BusinessCentralWebPreview._menuitem_locator(frame, label)
+        fallback.wait_for(state="visible", timeout=1_000)
+        return fallback
+
+    @staticmethod
     def _menuitem_locator(frame: Frame, label: str) -> Locator:
-        for candidate in menuitem_label_aliases(label):
-            locator = frame.locator(
-                f'button[role="menuitem"][aria-label="{_css_string(candidate)}"]'
-            )
-            try:
-                if locator.count():
-                    return locator.first
-            except Exception:
-                continue
+        visible = BusinessCentralWebPreview._first_visible_menuitem(frame, label)
+        if visible is not None:
+            return visible
         return frame.locator(
             f'button[role="menuitem"][aria-label="{_css_string(label)}"]'
         ).first
+
+    @staticmethod
+    def _first_visible_menuitem(frame: Frame, label: str) -> Locator | None:
+        for candidate in menuitem_label_aliases(label):
+            locators = (
+                frame.locator(
+                    f'button[role="menuitem"][aria-label="{_css_string(candidate)}"]'
+                ),
+                frame.locator(f'button[aria-label="{_css_string(candidate)}"]'),
+                frame.locator(f'button:has-text("{_css_string(candidate)}")'),
+            )
+            for locator in locators:
+                try:
+                    for index in range(locator.count()):
+                        item = locator.nth(index)
+                        if not item.is_visible():
+                            continue
+                        text = (item.inner_text() or "").strip().splitlines()[0].strip()
+                        aria = (item.get_attribute("aria-label") or "").strip()
+                        if (
+                            aria.casefold() == candidate.casefold()
+                            or text.casefold() == candidate.casefold()
+                        ):
+                            return item
+                except Exception:
+                    continue
+        return None
 
     @staticmethod
     def _action_button_locator(frame: Frame, action: ActionDefinition) -> Locator:
@@ -2163,6 +2211,11 @@ def _safe_filename(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_.-]+", "-", value).strip("-")[:80] or "item"
 
 
+ACTION_BAR_EXPAND_TITLES = (
+    "Mostrar acciones secundarias",
+    "Show additional actions",
+    "Mostrar ações secundárias",
+)
 ACTION_BAR_EXPAND_LABELS = (
     "Más opciones",
     "More options",
@@ -2171,10 +2224,19 @@ ACTION_BAR_EXPAND_LABELS = (
 
 
 def action_bar_expand_selectors() -> tuple[str, ...]:
-    return tuple(
-        f'button[aria-label="{_css_string(label)}"]'
+    selectors = [
+        f'button[title="{_css_string(title)}"]'
+        for title in ACTION_BAR_EXPAND_TITLES
+    ]
+    selectors.extend(
+        f'button[role="menuitem"]:has-text("{label}")'
         for label in ACTION_BAR_EXPAND_LABELS
     )
+    selectors.extend(
+        f'[aria-label="{_css_string(label)}"]'
+        for label in ACTION_BAR_EXPAND_LABELS
+    )
+    return tuple(selectors)
 
 
 def menu_aria_parts(value: str | None) -> tuple[str, ...]:

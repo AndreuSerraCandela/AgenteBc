@@ -233,4 +233,6 @@ def test_menu_aria_parts_supports_nested_path() -> None:
         "Registar...",
     )
     assert menuitem_label_aliases("Más opciones")[0] == "Más opciones"
-    assert any("Más opciones" in selector for selector in action_bar_expand_selectors())
+    selectors = action_bar_expand_selectors()
+    assert any("Más opciones" in selector for selector in selectors)
+    assert any("Mostrar acciones secundarias" in selector for selector in selectors)

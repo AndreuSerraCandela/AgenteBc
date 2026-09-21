@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: agente-bc
-Version: 0.2.3
+Version: 0.2.4
 Summary: Asistente de diagnóstico de errores de Business Central on-premises
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
