@@ -35,4 +35,5 @@ if ($iscc) {
 Write-Host ""
 Write-Host "Ejecutable: dist\AgenteBc.exe"
 Write-Host "Instalador: packaging\releases\AgenteBc-$Version-setup.exe"
-Write-Host "Publica packaging\releases en https://agentebc.malla.es/releases/"
+Write-Host "Publica el instalador (sin git):"
+Write-Host "  python scripts/publish_release.py packaging/releases/AgenteBc-$Version-setup.exe"

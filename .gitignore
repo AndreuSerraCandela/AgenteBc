@@ -13,4 +13,6 @@ logs/
 .cache/
 *.log
 packaging/actions/
+packaging/Output/
+packaging/releases/*.exe
 data/

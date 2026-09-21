@@ -10,6 +10,7 @@ from agentebc.web_preview import (
     _extract_bc_dialog_details,
     _extract_bc_dialog_message,
     _find_call_stack_in_values,
+    _fold_dialog_text,
     _parse_error_rows,
 )
 
@@ -44,6 +45,22 @@ def test_detects_confirmation_dialog_text() -> None:
         ("¿Desea crear los borradores de facturas",),
     )
     assert not _confirmation_visible(body, ("¿Desea anular",))
+
+
+def test_matches_dialog_title_ignoring_accents_and_loose_token() -> None:
+    body = "Dialogo Albaranes\n¿Cuántos albaranes quiere crear?"
+
+    assert _fold_dialog_text("Diálogo Albaranes") == "dialogo albaranes"
+    assert _confirmation_visible(body, ("Diálogo Albaranes",))
+    assert _confirmation_visible(
+        "¿Cuántos albaranes quiere crear?",
+        ("Diálogo Albaranes",),
+        loose=True,
+    )
+    assert not _confirmation_visible(
+        "¿Cuántos albaranes quiere crear?",
+        ("Diálogo Albaranes",),
+    )
 
 
 def test_extracts_business_central_message_dialog_text() -> None:

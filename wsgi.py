@@ -69,7 +69,14 @@ if os.environ.get("HTTP_PLATFORM_PORT"):
         from waitress import serve
 
         print(f"Iniciando portal AgenteBc en puerto {port} (IIS)", flush=True)
-        serve(application, host="127.0.0.1", port=port, threads=4, channel_timeout=120)
+        serve(
+            application,
+            host="127.0.0.1",
+            port=port,
+            threads=4,
+            channel_timeout=300,
+            max_request_body_size=100 * 1024 * 1024,
+        )
     except Exception as exc:
         if log_file:
             with open(log_file, "a", encoding="utf-8") as handle:

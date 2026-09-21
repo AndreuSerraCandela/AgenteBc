@@ -73,11 +73,14 @@ def _preview_status_payload() -> dict[str, object]:
         }
 
 
-def _set_preview_prompt(text: str | None) -> None:
+def _set_preview_prompt(text: str | None, asking: bool = False) -> None:
     with _preview_progress_lock:
         if text:
-            _preview_progress["state"] = "asking"
-            _preview_progress["prompt"] = text
+            display = text
+            if asking and "Business Central" not in text:
+                display = f"{text} en Business Central y pulse Aceptar."
+            _preview_progress["state"] = "asking" if asking else "running"
+            _preview_progress["prompt"] = display
             return
         if _preview_progress["state"] == "asking":
             _preview_progress["state"] = "running"
