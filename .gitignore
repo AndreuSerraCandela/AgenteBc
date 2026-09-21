@@ -9,5 +9,6 @@ htmlcov/
 *.local.env
 .browser-profile/
 reports/
+logs/
 .cache/
 *.log

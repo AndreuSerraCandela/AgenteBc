@@ -70,42 +70,91 @@ AgenteBc en servidor **no es** la misma app que en el PC del consultor:
 Al abrir `https://agentebc.malla.es` debe verse la pantalla de descarga (como en
 `http://127.0.0.1:8765` en local). El diagnóstico BC **no** va en el servidor.
 
-### Pasos (igual que otras apps Python en IIS)
+### Integración con appdesktop (apps.malla.es)
 
-1. **Instalar el paquete** en el entorno del sitio:
+En [App Malla Desktop](https://apps.malla.es/admin/apps) la app **agentebc** debe tener:
 
-   ```powershell
-   pip install -e .
+- **wwwroot:** `C:\inetpub\wwwroot\AgenteBc`
+- **app_pool:** `AgenteBc`
+- **Repo:** `AndreuSerraCandela/AgenteBc`
+
+Botones del panel:
+
+1. **Licencia** → registra la app en licence.malla.es (MyBeLic).
+2. **Webhook** → despliegue automático en cada push a `main`.
+3. **Desplegar ahora** → primera instalación manual.
+
+El deploy (`Deploy-App.ps1`) copia el código con `robocopy`, ejecuta
+`pip install -r requirements.txt` y recicla el app pool. **No** sube el `.exe`
+del instalador (va aparte).
+
+### Pasos (igual que Rutas, RoadBook, etc.)
+
+Ficheros de despliegue en la raíz del proyecto:
+
+| Fichero | Uso |
+|---------|-----|
+| `web.config` | HttpPlatformHandler + `AGENTEBC_RELEASES_DIR` |
+| `wsgi.py` | Portal + waitress cuando IIS asigna puerto |
+| `requirements_web.txt` | Flask y waitress (sin Playwright) |
+| `install_web_iis.bat` | Instala en `C:\Python\python.exe` del servidor |
+
+1. **Copiar el proyecto** al servidor (carpeta del sitio IIS).
+
+2. **Editar `web.config`** si hace falta:
+   - `processPath` → Python de IIS (suele ser `C:\Python\python.exe`)
+   - `AGENTEBC_RELEASES_DIR` → carpeta con `latest.json` y el `.exe` (por defecto `.\releases`)
+
+3. **Ejecutar en el servidor** (como administrador, en la carpeta del sitio):
+
+   ```bat
+   install_web_iis.bat
    ```
 
-2. **Apuntar IIS al WSGI correcto**: `wsgi.py` del proyecto (usa
-   `create_portal_app()`, no la app de diagnóstico). Si necesitas el diagnóstico
-   web en otro sitio interno, usa `wsgi_diagnose.py`.
-
-3. **Crear carpeta de releases** en el servidor, por ejemplo:
+4. **Copiar los instaladores** a `releases\`:
 
    ```
-   D:\webs\agentebc.malla.es\releases\
+   packaging/releases/latest.json   →  releases/latest.json
+   packaging/releases/AgenteBc-*.exe  →  releases/
    ```
 
-4. **Copiar los ficheros** desde tu PC de desarrollo:
+5. **Crear el sitio en IIS** apuntando a la carpeta del proyecto (donde está
+   `web.config`). Si necesitas el diagnóstico web en otro sitio interno, usa
+   `wsgi_diagnose.py` en lugar de `wsgi.py`.
+
+6. **Carpeta de releases del instalador** (fuera del código git, recomendado):
 
    ```
-   packaging/releases/latest.json
-   packaging/releases/AgenteBc-0.2.0-setup.exe
+   C:\inetpub\data\AgenteBc\releases\
    ```
 
-5. **Variable de entorno** en el sitio IIS (o en `web.config`):
+   En `web.config` del servidor:
 
-   ```env
-   AGENTEBC_RELEASES_DIR=D:\webs\agentebc.malla.es\releases
+   ```xml
+   <environmentVariable name="AGENTEBC_RELEASES_DIR" value="C:\inetpub\data\AgenteBc\releases" />
    ```
 
-6. **Comprobar** que responden:
+   Copia manualmente (no van en git):
+
+   - `latest.json`
+   - `AgenteBc-x.y.z-setup.exe`
+
+7. **Comprobar** que responden:
 
    - `https://agentebc.malla.es/` → pantalla de descarga
    - `https://agentebc.malla.es/releases/latest.json` → manifiesto JSON
    - `https://agentebc.malla.es/releases/AgenteBc-0.2.0-setup.exe` → instalador
+
+### Primera instalación (checklist)
+
+| Paso | Dónde | Qué hacer |
+|------|-------|-----------|
+| 1 | IIS | Crear sitio `agentebc.malla.es`, app pool `AgenteBc`, carpeta `C:\inetpub\wwwroot\AgenteBc` |
+| 2 | appdesktop | Alta de app `agentebc` con wwwroot y app_pool (ya en catálogo) |
+| 3 | appdesktop | Botón **Licencia** (MyBeLic) |
+| 4 | appdesktop | Botón **Desplegar ahora** o push a `main` con webhook |
+| 5 | Servidor | Copiar `latest.json` + `.exe` a `C:\inetpub\data\AgenteBc\releases\` |
+| 6 | Navegador | Abrir `https://agentebc.malla.es` y probar descarga |
 
 ### Al publicar una versión nueva
 
