@@ -1,7 +1,7 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.0-setup.exe",
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.1-setup.exe",
   "sha256": "reemplazar-con-hash-sha256-del-instalador",
-  "release_notes": "Primera versión de escritorio con WebView2, CDP local y actualizaciones automáticas."
+  "release_notes": "Correcciones de arranque y configuración inicial."
 }

@@ -1,7 +1,7 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.0-setup.exe",
-  "sha256": "c19072b65dc46cd083605d73b659458d66c7f9a66555e67f93d27ae9273972c1",
-  "release_notes": "Primera versión de escritorio con WebView2, configurador visual, CDP local para Google Modo IA y DeepSeek web, y actualizaciones automáticas."
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.1-setup.exe",
+  "sha256": "25712529bc9533997de0d5d27b6c00e4a31e5990400f87a5801960b3e50cbd06",
+  "release_notes": "Corrige el cierre al iniciar en un PC nuevo. La configuración inicial ahora es segura y los errores de arranque muestran un diálogo y se guardan en un registro."
 }
