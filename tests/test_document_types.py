@@ -79,11 +79,14 @@ def test_parses_dialog_steps_text() -> None:
     steps = parse_dialog_steps_text(
         "¿Desea crear los borradores|Sí\n"
         "Por términos|Aceptar|Por términos\n"
+        "Diálogo Albaranes|preguntar\n"
     )
 
-    assert len(steps) == 2
+    assert len(steps) == 3
     assert steps[1].button == "Aceptar"
     assert steps[1].selection == "Por términos"
+    assert steps[2].is_ask is True
+    assert steps[2].ask_prompt() == "Rellene «Diálogo Albaranes»"
 
 
 def test_registry_persists_dialog_steps(tmp_path: Path) -> None:

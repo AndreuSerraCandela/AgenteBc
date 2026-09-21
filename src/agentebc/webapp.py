@@ -57,6 +57,38 @@ from .web_preview import (
 )
 
 _preview_lock = threading.Lock()
+_preview_progress_lock = threading.Lock()
+_preview_progress: dict[str, object] = {
+    "state": "idle",
+    "prompt": None,
+}
+_preview_last_context: dict[str, object] | None = None
+
+
+def _preview_status_payload() -> dict[str, object]:
+    with _preview_progress_lock:
+        return {
+            "state": _preview_progress["state"],
+            "prompt": _preview_progress["prompt"],
+        }
+
+
+def _set_preview_prompt(text: str | None) -> None:
+    with _preview_progress_lock:
+        if text:
+            _preview_progress["state"] = "asking"
+            _preview_progress["prompt"] = text
+            return
+        if _preview_progress["state"] == "asking":
+            _preview_progress["state"] = "running"
+        _preview_progress["prompt"] = None
+
+
+def _set_preview_state(state: str) -> None:
+    with _preview_progress_lock:
+        _preview_progress["state"] = state
+        if state != "asking":
+            _preview_progress["prompt"] = None
 
 
 def create_app(
@@ -208,18 +240,7 @@ def create_app(
             error=None,
         )
 
-    @app.post("/preview")
-    def preview():
-        company = request.form.get("company", "").strip()
-        type_id = request.form.get("type_id", "").strip()
-        action_id = request.form.get("action_id", "").strip()
-        number = request.form.get("number", "").strip()
-        form = {
-            "company": company,
-            "type_id": type_id,
-            "action_id": action_id,
-            "number": number,
-        }
+    def _preview_page_context(form: dict[str, str], confirmed: str) -> dict[str, object]:
         error = None
         document = None
         preview_result = None
@@ -228,22 +249,20 @@ def create_app(
         ai_conclusion = None
         ai_pending = False
         ai_request = None
-        case_label = None
         primary_message = None
-
         try:
-            if request.form.get("confirmed") != "yes":
+            if confirmed != "yes":
                 raise ValueError("Debe confirmar que desea ejecutar la acción")
-            definition = registry.get(type_id)
-            action = definition.action(action_id)
+            definition = registry.get(form["type_id"])
+            action = definition.action(form["action_id"])
             if action.safety not in RUNNABLE_SAFETY_LEVELS:
                 raise ValueError(
                     "La acción está bloqueada hasta que se revise su seguridad"
                 )
             document = document_reader().find_document(
-                company=company,
+                company=form["company"],
                 definition=definition,
-                number=number,
+                number=form["number"],
             )
             if not _preview_lock.acquire(blocking=False):
                 raise PreviewError("Ya hay otra vista previa en ejecución")
@@ -251,6 +270,7 @@ def create_app(
                 preview_result = BusinessCentralWebPreview(
                     current_settings(),
                     reports_dir=reports_dir,
+                    on_prompt=_set_preview_prompt,
                 ).run(document, definition, action)
             finally:
                 _preview_lock.release()
@@ -313,27 +333,64 @@ def create_app(
         ) as exc:
             error = str(exc)
 
-        companies = load_companies(company)
-        return render_template(
-            "index.html",
-            companies=companies,
-            document_types=registry.all(),
-            default_company=current_settings().company,
-            connection_error=None,
-            form=form,
-            document=asdict(document) if document else None,
-            preview=asdict(preview_result) if preview_result else None,
-            diagnosis=(
+        return {
+            "companies": load_companies(form.get("company", "")),
+            "document_types": registry.all(),
+            "default_company": current_settings().company,
+            "connection_error": None,
+            "form": form,
+            "document": asdict(document) if document else None,
+            "preview": asdict(preview_result) if preview_result else None,
+            "diagnosis": (
                 diagnostic_report.as_dict() if diagnostic_report else None
             ),
-            enrichments=enrichments,
-            ai_conclusion=ai_conclusion,
-            ai_pending=ai_pending,
-            ai_request=ai_request,
-            ai_provider=current_settings().ai_provider,
-            discovered_actions=None,
-            error=error,
-        )
+            "enrichments": enrichments,
+            "ai_conclusion": ai_conclusion,
+            "ai_pending": ai_pending,
+            "ai_request": ai_request,
+            "ai_provider": current_settings().ai_provider,
+            "discovered_actions": None,
+            "error": error,
+        }
+
+    def _render_preview_page(context: dict[str, object]):
+        return render_template("index.html", **context)
+
+    @app.post("/preview")
+    def preview():
+        form = {
+            "company": request.form.get("company", "").strip(),
+            "type_id": request.form.get("type_id", "").strip(),
+            "action_id": request.form.get("action_id", "").strip(),
+            "number": request.form.get("number", "").strip(),
+        }
+        confirmed = request.form.get("confirmed", "").strip()
+        if request.headers.get("X-AgenteBc-Async") == "1":
+            if _preview_lock.locked():
+                return jsonify({"error": "Ya hay otra vista previa en ejecución"}), 409
+
+            def worker() -> None:
+                global _preview_last_context
+                _set_preview_state("running")
+                try:
+                    context = _preview_page_context(form, confirmed)
+                    _preview_last_context = context
+                finally:
+                    _set_preview_state("done")
+
+            threading.Thread(target=worker, name="agente-preview", daemon=True).start()
+            return jsonify({"accepted": True, "result_url": "/preview/last"}), 202
+        return _render_preview_page(_preview_page_context(form, confirmed))
+
+    @app.get("/api/preview-status")
+    def preview_status():
+        return jsonify(_preview_status_payload())
+
+    @app.get("/preview/last")
+    def preview_last():
+        if _preview_last_context is None:
+            return redirect(url_for("index"))
+        return _render_preview_page(_preview_last_context)
 
     @app.post("/preview/ai-conclusions")
     def preview_ai_conclusions():

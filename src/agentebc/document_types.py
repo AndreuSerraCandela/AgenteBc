@@ -8,6 +8,7 @@ from typing import Any
 
 VALID_SAFETY_LEVELS = {"blocked", "read_only", "diagnostic", "interactive"}
 RUNNABLE_SAFETY_LEVELS = frozenset({"read_only", "diagnostic", "interactive"})
+ASK_DIALOG_BUTTON = "preguntar"
 ID_PATTERN = re.compile(r"^[a-z][a-z0-9_-]{1,49}$")
 
 
@@ -60,6 +61,14 @@ class DialogStep:
             raise ValueError("Cada paso de diálogo necesita al menos un marcador")
         if not self.button:
             raise ValueError("Cada paso de diálogo necesita un botón")
+
+    @property
+    def is_ask(self) -> bool:
+        return self.button.casefold() == ASK_DIALOG_BUTTON
+
+    def ask_prompt(self) -> str:
+        title = self.markers[0] if self.markers else "el diálogo"
+        return f"Rellene «{title}»"
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,7 +1,7 @@
 {
-  "version": "0.2.4",
+  "version": "0.2.5",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.4-setup.exe",
-  "sha256": "b4ca550b130fca0a6a6c1ba8d2e037626386ac036b71d634a8d8b78dcc8edc65",
-  "release_notes": "Corrige Registrar en pedidos: pulsa Más opciones (Mostrar acciones secundarias), el Acciones del documento y Otros aunque no tenga aria-label."
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.5-setup.exe",
+  "sha256": "1d88f696d87160e6b51ca15a3efed95084938ba46bbeaf98836a6c9118486a60",
+  "release_notes": "Los pasos de diálogo pueden usar preguntar: el agente espera a que rellene la ventana y muestra el aviso en AgenteBc."
 }

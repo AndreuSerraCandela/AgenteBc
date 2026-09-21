@@ -213,6 +213,20 @@
         "dialog_steps": [
           {
             "markers": [
+              "Recibir y contabilizar"
+            ],
+            "button": "Aceptar",
+            "selection": "Recibir y contabilizar"
+          },
+          {
+            "markers": [
+              "Diálogo Albaranes"
+            ],
+            "button": "preguntar",
+            "selection": null
+          },
+          {
+            "markers": [
               "registrar el pedido"
             ],
             "button": "Sí",
