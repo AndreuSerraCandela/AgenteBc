@@ -103,6 +103,57 @@ def main(argv: list[str] | None = None) -> int:
         "sha256": digest,
         "release_notes": notes,
     }
+    url = args.portal.rstrip("/") + "/api/releases/upload"
+    chunk_size = 8 * 1024 * 1024
+    data = installer.read_bytes()
+    chunks = [data[index : index + chunk_size] for index in range(0, len(data), chunk_size)]
+    if not chunks:
+        print("El instalador está vacío", file=sys.stderr)
+        return 1
+    print(f"Subiendo {filename} ({len(data)} bytes, {len(chunks)} fragmentos) a {url}")
+    payload: dict[str, object] = {}
+    for index, chunk in enumerate(chunks):
+        body = _multipart_body(
+            fields={
+                **fields,
+                "chunk_index": str(index),
+                "chunk_count": str(len(chunks)),
+            },
+            filename=filename,
+            file_bytes=chunk,
+            boundary=boundary,
+        )
+        request = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "X-AgenteBc-Share-Token": token,
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            print(f"Error {exc.code} en fragmento {index + 1}: {detail}", file=sys.stderr)
+            return 1
+        except urllib.error.URLError as exc:
+            print(f"No se pudo conectar con el portal: {exc}", file=sys.stderr)
+            return 1
+        print(f"Fragmento {index + 1}/{len(chunks)}")
+    print(f"Publicado {payload.get('version')} → {payload.get('download_url')}")
+    return 0
+
+
+def _multipart_body(
+    *,
+    fields: dict[str, str],
+    filename: str,
+    file_bytes: bytes,
+    boundary: str,
+) -> bytes:
     body = bytearray()
     for name, value in fields.items():
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
@@ -117,31 +168,9 @@ def main(argv: list[str] | None = None) -> int:
             "Content-Type: application/octet-stream\r\n\r\n"
         ).encode("utf-8")
     )
-    body.extend(installer.read_bytes())
+    body.extend(file_bytes)
     body.extend(f"\r\n--{boundary}--\r\n".encode("utf-8"))
-    url = args.portal.rstrip("/") + "/api/releases/upload"
-    request = urllib.request.Request(
-        url,
-        data=bytes(body),
-        method="POST",
-        headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "X-AgenteBc-Share-Token": token,
-        },
-    )
-    print(f"Subiendo {filename} ({installer.stat().st_size} bytes) a {url}")
-    try:
-        with urllib.request.urlopen(request, timeout=300) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        print(f"Error {exc.code}: {detail}", file=sys.stderr)
-        return 1
-    except urllib.error.URLError as exc:
-        print(f"No se pudo conectar con el portal: {exc}", file=sys.stderr)
-        return 1
-    print(f"Publicado {payload.get('version')} → {payload.get('download_url')}")
-    return 0
+    return bytes(body)
 
 
 if __name__ == "__main__":
