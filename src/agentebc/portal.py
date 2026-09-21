@@ -148,13 +148,36 @@ def register_release_upload_routes(app: Flask) -> None:
                 "La versión no coincide con el nombre del instalador",
                 400,
             )
+        try:
+            chunk_index = _optional_int(request.form.get("chunk_index"), 0)
+            chunk_count = _optional_int(request.form.get("chunk_count"), 1)
+        except ValueError:
+            return _json_error("chunk_index y chunk_count deben ser enteros", 400)
+        if chunk_count < 1 or chunk_index < 0 or chunk_index >= chunk_count:
+            return _json_error("Los índices de fragmento no son válidos", 400)
         expected_sha = (request.form.get("sha256") or "").strip().lower()
         folder = releases_dir()
         try:
             folder.mkdir(parents=True, exist_ok=True)
             dest = folder / filename
             partial = dest.with_name(f"{dest.name}.partial")
-            uploaded.save(partial)
+            if chunk_index == 0 and partial.exists():
+                partial.unlink()
+            with partial.open("ab") as handle:
+                uploaded.save(handle)
+            if chunk_index + 1 < chunk_count:
+                return (
+                    jsonify(
+                        {
+                            "accepted": True,
+                            "filename": filename,
+                            "chunk_index": chunk_index,
+                            "chunk_count": chunk_count,
+                            "complete": False,
+                        }
+                    ),
+                    202,
+                )
             digest = hashlib.sha256(partial.read_bytes()).hexdigest()
             if expected_sha and expected_sha != digest:
                 partial.unlink(missing_ok=True)
@@ -189,6 +212,12 @@ def register_release_upload_routes(app: Flask) -> None:
             ),
             201,
         )
+
+
+def _optional_int(value: object, default: int) -> int:
+    if value is None or str(value).strip() == "":
+        return default
+    return int(str(value).strip())
 
 
 def _parser() -> argparse.ArgumentParser:

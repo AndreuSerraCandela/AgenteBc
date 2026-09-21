@@ -110,3 +110,46 @@ def test_upload_release_writes_installer_and_manifest(
     assert manifest["version"] == "0.2.6"
     assert manifest["sha256"] == digest
     assert manifest["download_url"].endswith("AgenteBc-0.2.6-setup.exe")
+
+
+def test_upload_release_accepts_chunks(tmp_path: Path, monkeypatch) -> None:
+    releases = tmp_path / "releases"
+    releases.mkdir()
+    monkeypatch.setenv("AGENTEBC_RELEASES_DIR", str(releases))
+    monkeypatch.setenv("AGENTEBC_SHARE_TOKEN", "secret-token")
+    client = create_portal_app().test_client()
+    payload = b"abcdef123456"
+    digest = hashlib.sha256(payload).hexdigest()
+    headers = {"X-AgenteBc-Share-Token": "secret-token"}
+
+    first = client.post(
+        "/api/releases/upload",
+        data={
+            "file": (io.BytesIO(payload[:6]), "AgenteBc-0.2.6-setup.exe"),
+            "chunk_index": "0",
+            "chunk_count": "2",
+            "sha256": digest,
+        },
+        content_type="multipart/form-data",
+        headers=headers,
+    )
+    assert first.status_code == 202
+    assert first.json["complete"] is False
+
+    last = client.post(
+        "/api/releases/upload",
+        data={
+            "file": (io.BytesIO(payload[6:]), "AgenteBc-0.2.6-setup.exe"),
+            "chunk_index": "1",
+            "chunk_count": "2",
+            "sha256": digest,
+            "release_notes": "Por fragmentos",
+        },
+        content_type="multipart/form-data",
+        headers=headers,
+    )
+    assert last.status_code == 201
+    assert (releases / "AgenteBc-0.2.6-setup.exe").read_bytes() == payload
+    assert json.loads((releases / "latest.json").read_text(encoding="utf-8"))[
+        "sha256"
+    ] == digest
