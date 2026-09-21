@@ -175,5 +175,52 @@
         ]
       }
     ]
+  },
+  {
+    "id": "purchase_order",
+    "label": "Pedido Compra",
+    "page_id": 50,
+    "source_table": "Purchase Header",
+    "odata_service": "purchaseDocuments",
+    "odata_key_field": "number",
+    "odata_select_fields": {
+      "system_id": "id",
+      "number": "number",
+      "document_type": "documentType",
+      "status": "status",
+      "posting_date": "postingDate"
+    },
+    "odata_filters": {
+      "documentType": "Order"
+    },
+    "page_filters": {
+      "Document Type": "Order"
+    },
+    "actions": [
+      {
+        "id": "registrar",
+        "label": "Registrar",
+        "safety": "diagnostic",
+        "menu_aria_label": "Acciones relacionadas para Registrar",
+        "action_aria_label": "Registrar...",
+        "result_markers": [
+          "Mensajes de error"
+        ],
+        "parse_error_rows": true,
+        "auto_confirm": true,
+        "confirmation_markers": [],
+        "confirmation_button": "Sí",
+        "dialog_steps": [
+          {
+            "markers": [
+              "registrar el pedido"
+            ],
+            "button": "Sí",
+            "selection": null
+          }
+        ],
+        "field_edits": []
+      }
+    ]
   }
 ]

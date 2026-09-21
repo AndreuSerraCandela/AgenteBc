@@ -128,7 +128,8 @@
           </div>
           <div>
             <label for="AGENTEBC_SHARE_TOKEN">Token compartido</label>
-            <input id="AGENTEBC_SHARE_TOKEN" name="AGENTEBC_SHARE_TOKEN" type="password" value="" placeholder="{% if values.AGENTEBC_SHARE_TOKEN %}Dejar vacío para no cambiar{% else %}El mismo token en todos los PCs{% endif %}">
+            <input id="AGENTEBC_SHARE_TOKEN" name="AGENTEBC_SHARE_TOKEN" type="password" value="" placeholder="{% if values.AGENTEBC_SHARE_TOKEN %}Dejar vacío para no cambiar{% else %}El mismo token que en el .env del portal{% endif %}">
+            <p class="hint">Mismo valor en todos los PCs. En el servidor vive en el <code>.env</code>, no en web.config.</p>
           </div>
         </div>
       </section>

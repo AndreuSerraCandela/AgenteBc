@@ -170,6 +170,25 @@ def test_portal_share_inbox_and_ack(tmp_path: Path, monkeypatch) -> None:
 def test_portal_share_requires_token_config(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("AGENTEBC_ACTIONS_DIR", str(tmp_path / "actions"))
     monkeypatch.delenv("AGENTEBC_SHARE_TOKEN", raising=False)
+    monkeypatch.delenv("AGENTEBC_ENV_FILE", raising=False)
+    monkeypatch.chdir(tmp_path)
     client = create_portal_app().test_client()
     response = client.get("/api/actions/inbox")
     assert response.status_code == 503
+
+
+def test_portal_reads_share_token_from_env_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENTEBC_ACTIONS_DIR", str(tmp_path / "actions"))
+    monkeypatch.delenv("AGENTEBC_SHARE_TOKEN", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("AGENTEBC_SHARE_TOKEN=from-env-file\n", encoding="utf-8")
+    monkeypatch.setenv("AGENTEBC_ENV_FILE", str(env_file))
+    monkeypatch.chdir(tmp_path)
+    client = create_portal_app().test_client()
+    denied = client.get("/api/actions/inbox")
+    allowed = client.get(
+        "/api/actions/inbox",
+        headers={"X-AgenteBc-Share-Token": "from-env-file"},
+    )
+    assert denied.status_code == 401
+    assert allowed.status_code == 200
