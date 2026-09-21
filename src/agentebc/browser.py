@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from playwright.sync_api import Browser, BrowserContext, Playwright
-
 if TYPE_CHECKING:
+    from playwright.sync_api import Browser, BrowserContext, Playwright
+
     from .config import Settings
 
 _ALLOWED_BROWSER_CHANNELS = {
