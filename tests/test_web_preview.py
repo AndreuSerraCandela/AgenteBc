@@ -1,6 +1,10 @@
 from agentebc.document_types import ActionDefinition, DialogStep
 from agentebc.web_preview import (
     BusinessCentralWebPreview,
+    action_bar_expand_selectors,
+    menu_aria_parts,
+    menu_aria_root,
+    menuitem_label_aliases,
     _confirmation_visible,
     _encode_error_grid_headers,
     _extract_bc_dialog_details,
@@ -210,3 +214,23 @@ def test_extracts_shared_details_from_message_dialog() -> None:
 
     assert details is not None
     assert "Crear_Facturas_Terminos line 634" in details
+
+
+def test_menu_aria_parts_supports_nested_path() -> None:
+    assert menu_aria_parts("Acciones|Registro|Otros") == (
+        "Acciones",
+        "Registro",
+        "Otros",
+    )
+    assert menu_aria_root("Acciones|Registro|Otros") == "Acciones"
+    assert menu_aria_parts("Acciones relacionadas para Registrar") == (
+        "Acciones relacionadas para Registrar",
+    )
+    assert menu_aria_parts(None) == ()
+    assert menuitem_label_aliases("Outros") == ("Outros", "Otros")
+    assert menuitem_label_aliases("Registrar...") == (
+        "Registrar...",
+        "Registar...",
+    )
+    assert menuitem_label_aliases("Más opciones")[0] == "Más opciones"
+    assert any("Más opciones" in selector for selector in action_bar_expand_selectors())

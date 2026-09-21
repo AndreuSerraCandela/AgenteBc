@@ -243,10 +243,12 @@ class BusinessCentralWebPreview:
     ) -> Frame:
         deadline = time.monotonic() + self._settings.request_timeout_seconds
         selectors: list[str] = []
-        if action.menu_aria_label:
+        menu_root = menu_aria_root(action.menu_aria_label)
+        if menu_root:
             selectors.append(
-                f'button[aria-label="{_css_string(action.menu_aria_label)}"]'
+                f'button[aria-label="{_css_string(menu_root)}"]'
             )
+            selectors.extend(action_bar_expand_selectors())
         if action.action_aria_label:
             selectors.append(
                 f'button[aria-label="{_css_string(action.action_aria_label)}"]'
@@ -278,8 +280,14 @@ class BusinessCentralWebPreview:
             for frame in page.frames:
                 for selector in selectors:
                     try:
-                        if frame.locator(selector).count():
-                            return frame
+                        if not frame.locator(selector).count():
+                            continue
+                        if menu_root:
+                            BusinessCentralWebPreview._expand_action_bar(
+                                frame,
+                                menu_root,
+                            )
+                        return frame
                     except Exception:
                         continue
             page.wait_for_timeout(500)
@@ -491,26 +499,122 @@ class BusinessCentralWebPreview:
         if not action.menu_aria_label and not action.action_aria_label:
             return
         if action.menu_aria_label:
-            menu = frame.locator(
-                f'button[aria-label="{_css_string(action.menu_aria_label)}"]'
+            BusinessCentralWebPreview._open_menu_path(
+                frame,
+                action.menu_aria_label,
             )
-            menu.first.evaluate("(element) => element.click()")
+        action_button = BusinessCentralWebPreview._reveal_action_button(
+            frame,
+            action,
+        )
+        action_button.evaluate("(element) => element.click()")
+
+    @staticmethod
+    def _open_menu_path(frame: Frame, menu_aria_label: str) -> None:
+        parts = menu_aria_parts(menu_aria_label)
+        if not parts:
+            return
+        BusinessCentralWebPreview._expand_action_bar(frame, parts[0])
+        root = BusinessCentralWebPreview._toolbar_button_locator(frame, parts[0])
+        root.wait_for(state="visible", timeout=10_000)
+        root.evaluate("(element) => element.click()")
+        frame.page.wait_for_timeout(300)
+        for part in parts[1:]:
+            item = BusinessCentralWebPreview._menuitem_locator(frame, part)
+            item.wait_for(state="visible", timeout=10_000)
+            item.evaluate("(element) => element.click()")
             frame.page.wait_for_timeout(300)
+
+    @staticmethod
+    def _reveal_action_button(frame: Frame, action: ActionDefinition) -> Locator:
         action_button = BusinessCentralWebPreview._action_button_locator(
             frame,
             action,
         )
+        try:
+            if action_button.is_visible():
+                return action_button
+        except Exception:
+            pass
+        popups = frame.locator(
+            'button[role="menuitem"][aria-haspopup="true"]:visible'
+        )
+        for index in range(popups.count()):
+            try:
+                popups.nth(index).evaluate("(element) => element.click()")
+                frame.page.wait_for_timeout(250)
+            except Exception:
+                continue
+            try:
+                if action_button.is_visible():
+                    return action_button
+            except Exception:
+                continue
         action_button.wait_for(state="visible", timeout=10_000)
-        action_button.evaluate("(element) => element.click()")
+        return action_button
+
+    @staticmethod
+    def _expand_action_bar(frame: Frame, needed_label: str | None = None) -> None:
+        if needed_label and BusinessCentralWebPreview._toolbar_button_visible(
+            frame,
+            needed_label,
+        ):
+            return
+        for label in ACTION_BAR_EXPAND_LABELS:
+            button = BusinessCentralWebPreview._toolbar_button_locator(frame, label)
+            try:
+                if not button.count() or not button.is_visible():
+                    continue
+                button.evaluate("(element) => element.click()")
+                frame.page.wait_for_timeout(400)
+                return
+            except Exception:
+                continue
+
+    @staticmethod
+    def _toolbar_button_visible(frame: Frame, label: str) -> bool:
+        button = BusinessCentralWebPreview._toolbar_button_locator(frame, label)
+        try:
+            return bool(button.count() and button.is_visible())
+        except Exception:
+            return False
+
+    @staticmethod
+    def _toolbar_button_locator(frame: Frame, label: str) -> Locator:
+        for candidate in menuitem_label_aliases(label):
+            locator = frame.locator(
+                f'button[aria-label="{_css_string(candidate)}"]'
+            )
+            try:
+                if locator.count():
+                    return locator.first
+            except Exception:
+                continue
+        return frame.locator(
+            f'button[aria-label="{_css_string(label)}"]'
+        ).first
+
+    @staticmethod
+    def _menuitem_locator(frame: Frame, label: str) -> Locator:
+        for candidate in menuitem_label_aliases(label):
+            locator = frame.locator(
+                f'button[role="menuitem"][aria-label="{_css_string(candidate)}"]'
+            )
+            try:
+                if locator.count():
+                    return locator.first
+            except Exception:
+                continue
+        return frame.locator(
+            f'button[role="menuitem"][aria-label="{_css_string(label)}"]'
+        ).first
 
     @staticmethod
     def _action_button_locator(frame: Frame, action: ActionDefinition) -> Locator:
         label = action.action_aria_label or ""
-        escaped = _css_string(label)
         if action.menu_aria_label:
-            return frame.locator(
-                f'button[role="menuitem"][aria-label="{escaped}"]'
-            ).first
+            return BusinessCentralWebPreview._menuitem_locator(frame, label)
+        escaped = _css_string(label)
         candidates = frame.locator(f'button[aria-label="{escaped}"]')
         if candidates.count() == 1:
             return candidates.first
@@ -1154,6 +1258,7 @@ class BusinessCentralActionExplorer:
     @staticmethod
     def _collect_actions(frame: Frame) -> list[DiscoveredAction]:
         found: dict[tuple[str, str | None], DiscoveredAction] = {}
+        BusinessCentralWebPreview._expand_action_bar(frame)
         direct_buttons = frame.locator(
             'button[data-top-level-action="true"][aria-label]'
         )
@@ -1183,20 +1288,11 @@ class BusinessCentralActionExplorer:
             try:
                 menu.evaluate("(element) => element.click()")
                 frame.page.wait_for_timeout(120)
-                items = frame.locator(
-                    'button[role="menuitem"][aria-label]:visible'
+                BusinessCentralWebPreview._collect_menu_tree(
+                    frame,
+                    menu_label,
+                    found,
                 )
-                for item_index in range(items.count()):
-                    item = items.nth(item_index)
-                    label = (item.get_attribute("aria-label") or "").strip()
-                    if label:
-                        found[(label, menu_label)] = DiscoveredAction(
-                            label=label,
-                            menu_aria_label=menu_label,
-                            title=_optional_attribute(
-                                item.get_attribute("title")
-                            ),
-                        )
             except Exception:
                 continue
             finally:
@@ -1206,6 +1302,53 @@ class BusinessCentralActionExplorer:
             found.values(),
             key=lambda item: ((item.menu_aria_label or ""), item.label),
         )
+
+    @staticmethod
+    def _collect_menu_tree(
+        frame: Frame,
+        menu_path: str,
+        found: dict[tuple[str, str | None], DiscoveredAction],
+        visited: set[str] | None = None,
+    ) -> None:
+        walked = visited if visited is not None else set()
+        if menu_path in walked:
+            return
+        walked.add(menu_path)
+        items = frame.locator('button[role="menuitem"][aria-label]:visible')
+        snapshot: list[tuple[str, bool, str | None]] = []
+        for index in range(items.count()):
+            item = items.nth(index)
+            label = (item.get_attribute("aria-label") or "").strip()
+            if not label:
+                continue
+            has_popup = (item.get_attribute("aria-haspopup") or "").lower() in {
+                "true",
+                "menu",
+            }
+            snapshot.append(
+                (label, has_popup, _optional_attribute(item.get_attribute("title")))
+            )
+            found[(label, menu_path)] = DiscoveredAction(
+                label=label,
+                menu_aria_label=menu_path,
+                title=_optional_attribute(item.get_attribute("title")),
+            )
+        for label, has_popup, _title in snapshot:
+            if not has_popup:
+                continue
+            nested_path = f"{menu_path}|{label}"
+            try:
+                nested = BusinessCentralWebPreview._menuitem_locator(frame, label)
+                nested.evaluate("(element) => element.click()")
+                frame.page.wait_for_timeout(150)
+                BusinessCentralWebPreview._collect_menu_tree(
+                    frame,
+                    nested_path,
+                    found,
+                    walked,
+                )
+            except Exception:
+                continue
 
 
 _ERROR_GRID_HEADER_PREFIX = "__HEADERS__"
@@ -2018,6 +2161,48 @@ def _extract_validation_source_fields(
 
 def _safe_filename(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_.-]+", "-", value).strip("-")[:80] or "item"
+
+
+ACTION_BAR_EXPAND_LABELS = (
+    "Más opciones",
+    "More options",
+    "Mais opções",
+)
+
+
+def action_bar_expand_selectors() -> tuple[str, ...]:
+    return tuple(
+        f'button[aria-label="{_css_string(label)}"]'
+        for label in ACTION_BAR_EXPAND_LABELS
+    )
+
+
+def menu_aria_parts(value: str | None) -> tuple[str, ...]:
+    if not value:
+        return ()
+    return tuple(part.strip() for part in value.split("|") if part.strip())
+
+
+def menu_aria_root(value: str | None) -> str | None:
+    parts = menu_aria_parts(value)
+    return parts[0] if parts else None
+
+
+def menuitem_label_aliases(label: str) -> tuple[str, ...]:
+    text = (label or "").strip()
+    if not text:
+        return ()
+    aliases = {
+        "outros": ("Outros", "Otros"),
+        "otros": ("Otros", "Outros"),
+        "registrar...": ("Registrar...", "Registar..."),
+        "registar...": ("Registar...", "Registrar..."),
+        "más opciones": ("Más opciones", "More options", "Mais opções"),
+        "more options": ("More options", "Más opciones", "Mais opções"),
+        "mais opções": ("Mais opções", "Más opciones", "More options"),
+        "acciones": ("Acciones", "Actions", "Ações"),
+    }
+    return aliases.get(text.casefold(), (text,))
 
 
 def _css_string(value: str | None) -> str:
