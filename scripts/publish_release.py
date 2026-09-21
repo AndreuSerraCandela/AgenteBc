@@ -143,7 +143,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"No se pudo conectar con el portal: {exc}", file=sys.stderr)
             return 1
         print(f"Fragmento {index + 1}/{len(chunks)}")
-    print(f"Publicado {payload.get('version')} → {payload.get('download_url')}")
+    print(f"Publicado {payload.get('version')} -> {payload.get('download_url')}")
     return 0
 
 
