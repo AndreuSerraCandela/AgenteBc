@@ -59,18 +59,27 @@ class ActionShareClient:
             },
         )
 
-    def inbox(self, *, status: str = "pending") -> list[dict[str, Any]]:
-        payload = self._request(
-            "GET",
-            f"/api/actions/inbox?status={urllib.parse.quote(status)}",
+    def inbox(
+        self,
+        *,
+        status: str = "pending",
+        for_user: str = "",
+    ) -> list[dict[str, Any]]:
+        query = urllib.parse.urlencode(
+            {
+                "status": status,
+                "for_user": for_user,
+            },
+            quote_via=urllib.parse.quote,
         )
+        payload = self._request("GET", f"/api/actions/inbox?{query}")
         items = payload.get("items", [])
         if not isinstance(items, list):
             raise ActionShareError("El buzón no devolvió una lista de acciones")
         return [item for item in items if isinstance(item, dict)]
 
-    def pending_count(self) -> int:
-        return len(self.inbox(status="pending"))
+    def pending_count(self, *, for_user: str = "") -> int:
+        return len(self.inbox(status="pending", for_user=for_user))
 
     def get(self, share_id: str) -> dict[str, Any]:
         return self._request("GET", f"/api/actions/{share_id}")
@@ -155,7 +164,7 @@ def _http_error_message(exc: urllib.error.HTTPError) -> str:
     if exc.code == 404:
         return detail or "Acción compartida no encontrada"
     if exc.code == 409:
-        return detail or "Esta acción ya fue procesada"
+        return detail or "Este usuario ya procesó esta acción"
     if exc.code == 503:
         return detail or "El portal no tiene el token de compartir configurado"
     return detail or f"El portal de acciones respondió HTTP {exc.code}"
