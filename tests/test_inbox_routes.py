@@ -20,11 +20,22 @@ class FakeShareClient:
         self.shared.append((definition.id, action.id, note))
         return {"id": "shared-1"}
 
-    def inbox(self, *, status="pending"):
-        return [item for item in self.items if item.get("status", "pending") == status]
+    def inbox(self, *, status="pending", for_user=""):
+        pending = [
+            item
+            for item in self.items
+            if item.get("status", "pending") == status
+        ]
+        if not for_user:
+            return pending
+        return [
+            item
+            for item in pending
+            if for_user not in (item.get("acks") or {})
+        ]
 
-    def pending_count(self) -> int:
-        return len(self.inbox())
+    def pending_count(self, *, for_user="") -> int:
+        return len(self.inbox(for_user=for_user))
 
     def get(self, share_id: str) -> dict:
         for item in self.items:

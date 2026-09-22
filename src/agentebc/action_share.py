@@ -17,8 +17,9 @@ from .document_types import ActionDefinition, DocumentTypeDefinition, DocumentTy
 SHARE_ID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
-VALID_STATUSES = frozenset({"pending", "accepted", "rejected"})
+VALID_STATUSES = frozenset({"pending", "closed"})
 _ACK_STATUSES = frozenset({"accepted", "rejected"})
+_LEGACY_SHARE_STATUSES = frozenset({"accepted", "rejected"})
 _DEFAULT_ACTIONS_DIR = Path(__file__).resolve().parents[2] / "packaging" / "actions"
 _OBSOLETE_IIS_ACTIONS_DIR = Path(r"C:\inetpub\data\AgenteBc\actions")
 _MAX_NOTE = 500
@@ -30,7 +31,7 @@ class ActionShareError(ValueError):
 
 
 class ActionShareConflict(ActionShareError):
-    """La acción compartida ya no está pendiente."""
+    """El usuario ya registró un acuse para esta acción."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,8 +43,7 @@ class SharedAction:
     status: str
     document_type: dict[str, Any]
     action: dict[str, Any]
-    acked_at: str | None = None
-    acked_by: str | None = None
+    acks: dict[str, dict[str, str]]
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -57,8 +57,7 @@ class SharedAction:
             "action_id": self.action.get("id"),
             "action_label": self.action.get("label"),
             "safety": self.action.get("safety"),
-            "acked_at": self.acked_at,
-            "acked_by": self.acked_by,
+            "acks": dict(self.acks),
         }
 
     def as_dict(self) -> dict[str, Any]:
@@ -70,9 +69,20 @@ class SharedAction:
             "status": self.status,
             "document_type": self.document_type,
             "action": self.action,
-            "acked_at": self.acked_at,
-            "acked_by": self.acked_by,
+            "acks": dict(self.acks),
         }
+
+    def ack_for(self, user: str) -> dict[str, str] | None:
+        key = _clip(user, _MAX_NAME)
+        if not key:
+            return None
+        entry = self.acks.get(key)
+        return dict(entry) if entry else None
+
+    def pending_for(self, user: str) -> bool:
+        if self.status != "pending":
+            return False
+        return self.ack_for(user) is None
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "SharedAction":
@@ -80,9 +90,7 @@ class SharedAction:
             payload.get("document_type"),
             payload.get("action"),
         )
-        status = str(payload.get("status") or "pending").strip()
-        if status not in VALID_STATUSES:
-            raise ActionShareError("El estado de la acción compartida no es válido")
+        status, acks = _load_share_status_and_acks(payload)
         share_id = str(payload.get("id") or "").strip()
         if not SHARE_ID_PATTERN.fullmatch(share_id):
             raise ActionShareError("El id de la acción compartida no es válido")
@@ -94,8 +102,7 @@ class SharedAction:
             status=status,
             document_type=document_type,
             action=action,
-            acked_at=_optional_text(payload.get("acked_at")),
-            acked_by=_optional_text(payload.get("acked_by")),
+            acks=acks,
         )
 
 
@@ -124,6 +131,7 @@ class ActionShareStore:
             status="pending",
             document_type=type_payload,
             action=action_payload,
+            acks={},
         )
         try:
             self._write(item)
@@ -142,9 +150,15 @@ class ActionShareStore:
             raise ActionShareError("El fichero compartido no es un objeto JSON")
         return SharedAction.from_dict(payload)
 
-    def list(self, *, status: str | None = "pending") -> list[SharedAction]:
+    def list(
+        self,
+        *,
+        status: str | None = "pending",
+        for_user: str | None = None,
+    ) -> list[SharedAction]:
         if status and status != "all" and status not in VALID_STATUSES:
             raise ActionShareError("El filtro de estado no es válido")
+        user_filter = _clip(for_user, _MAX_NAME) if for_user else ""
         items: list[SharedAction] = []
         if not self.path.is_dir():
             return items
@@ -160,6 +174,8 @@ class ActionShareStore:
                 continue
             if status and status != "all" and item.status != status:
                 continue
+            if user_filter and not item.pending_for(user_filter):
+                continue
             items.append(item)
         items.sort(key=lambda item: item.created_at, reverse=True)
         return items
@@ -173,19 +189,28 @@ class ActionShareStore:
     ) -> SharedAction:
         if status not in _ACK_STATUSES:
             raise ActionShareError("El acuse debe ser accepted o rejected")
+        user = _clip(acked_by, _MAX_NAME)
+        if not user:
+            raise ActionShareError("Falta el usuario del acuse")
         current = self.get(share_id)
         if current.status != "pending":
-            raise ActionShareConflict("Esta acción ya fue procesada")
+            raise ActionShareConflict("Esta acción compartida ya está cerrada")
+        if current.ack_for(user) is not None:
+            raise ActionShareConflict("Este usuario ya procesó esta acción")
+        acks = dict(current.acks)
+        acks[user] = {
+            "status": status,
+            "at": datetime.now(UTC).isoformat(),
+        }
         updated = SharedAction(
             id=current.id,
             created_at=current.created_at,
             from_user=current.from_user,
             note=current.note,
-            status=status,
+            status=current.status,
             document_type=current.document_type,
             action=current.action,
-            acked_at=datetime.now(UTC).isoformat(),
-            acked_by=_clip(acked_by, _MAX_NAME) or None,
+            acks=acks,
         )
         self._write(updated)
         return updated
@@ -303,8 +328,12 @@ def register_action_share_routes(app: Flask) -> None:
         if auth_error is not None:
             return auth_error
         status = (request.args.get("status") or "pending").strip()
+        for_user = str(request.args.get("for_user") or "").strip()
         try:
-            items = store.list(status=status)
+            items = store.list(
+                status=status,
+                for_user=for_user or None,
+            )
         except ActionShareError as exc:
             return _json_error(str(exc), 400)
         return jsonify(
@@ -386,3 +415,38 @@ def _clip(value: Any, limit: int) -> str:
 def _optional_text(value: Any) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _parse_acks(raw: Any) -> dict[str, dict[str, str]]:
+    if not isinstance(raw, dict):
+        return {}
+    parsed: dict[str, dict[str, str]] = {}
+    for user, entry in raw.items():
+        user_key = _clip(user, _MAX_NAME)
+        if not user_key or not isinstance(entry, dict):
+            continue
+        ack_status = str(entry.get("status") or "").strip()
+        if ack_status not in _ACK_STATUSES:
+            continue
+        ack_at = _optional_text(entry.get("at")) or datetime.now(UTC).isoformat()
+        parsed[user_key] = {"status": ack_status, "at": ack_at}
+    return parsed
+
+
+def _load_share_status_and_acks(
+    payload: dict[str, Any],
+) -> tuple[str, dict[str, dict[str, str]]]:
+    acks = _parse_acks(payload.get("acks"))
+    status = str(payload.get("status") or "pending").strip()
+    if status in _LEGACY_SHARE_STATUSES:
+        legacy_user = _clip(payload.get("acked_by"), _MAX_NAME)
+        legacy_at = _optional_text(payload.get("acked_at"))
+        if legacy_user and legacy_user not in acks:
+            acks[legacy_user] = {
+                "status": status,
+                "at": legacy_at or datetime.now(UTC).isoformat(),
+            }
+        status = "pending"
+    if status not in VALID_STATUSES:
+        raise ActionShareError("El estado de la acción compartida no es válido")
+    return status, acks

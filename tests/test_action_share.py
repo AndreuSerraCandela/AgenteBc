@@ -1,3 +1,5 @@
+import json
+from dataclasses import asdict
 from pathlib import Path
 
 from agentebc.action_share import (
@@ -60,9 +62,11 @@ def test_store_share_inbox_and_ack(tmp_path: Path) -> None:
     ]
 
     acked = store.ack(item.id, status="accepted", acked_by="Pepe")
-    assert acked.status == "accepted"
-    assert store.list(status="pending") == []
-    assert store.list(status="accepted")[0].acked_by == "Pepe"
+    assert acked.status == "pending"
+    assert acked.acks["Pepe"]["status"] == "accepted"
+    assert store.list(status="pending", for_user="Pepe") == []
+    assert len(store.list(status="pending", for_user="Luis")) == 1
+    assert len(store.list(status="pending")) == 1
 
 
 def test_ack_of_processed_item_conflicts(tmp_path: Path) -> None:
@@ -158,13 +162,20 @@ def test_portal_share_inbox_and_ack(tmp_path: Path, monkeypatch) -> None:
         headers={"X-AgenteBc-Share-Token": "secret-token"},
     )
     assert ack.status_code == 200
-    assert ack.json["status"] == "accepted"
+    assert ack.json["status"] == "pending"
+    assert ack.json["acks"]["Pepe"]["status"] == "accepted"
 
-    empty = client.get(
-        "/api/actions/inbox",
+    empty_for_pepe = client.get(
+        "/api/actions/inbox?for_user=Pepe",
         headers={"X-AgenteBc-Share-Token": "secret-token"},
     )
-    assert empty.json["count"] == 0
+    assert empty_for_pepe.json["count"] == 0
+
+    still_for_luis = client.get(
+        "/api/actions/inbox?for_user=Luis",
+        headers={"X-AgenteBc-Share-Token": "secret-token"},
+    )
+    assert still_for_luis.json["count"] == 1
 
 
 def test_portal_share_requires_token_config(tmp_path: Path, monkeypatch) -> None:
@@ -175,6 +186,43 @@ def test_portal_share_requires_token_config(tmp_path: Path, monkeypatch) -> None
     client = create_portal_app().test_client()
     response = client.get("/api/actions/inbox")
     assert response.status_code == 503
+
+
+def test_legacy_global_ack_migrates_to_per_user_acks(tmp_path: Path) -> None:
+    actions = tmp_path / "actions"
+    actions.mkdir()
+    share_id = "33333333-3333-4333-8333-333333333333"
+    legacy = {
+        "id": share_id,
+        "created_at": "2026-09-21T10:00:00+00:00",
+        "from_user": "Andrés",
+        "note": "",
+        "status": "accepted",
+        "acked_by": "Pepe",
+        "acked_at": "2026-09-21T11:00:00+00:00",
+        "document_type": asdict(_document_type(_action())),
+        "action": asdict(_action()),
+    }
+    (actions / f"{share_id}.json").write_text(
+        json.dumps(legacy, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    store = ActionShareStore(actions)
+    item = store.get(share_id)
+    assert item.status == "pending"
+    assert item.acks["Pepe"]["status"] == "accepted"
+    assert store.list(status="pending", for_user="Luis")[0].id == share_id
+
+
+def test_two_users_can_ack_same_share(tmp_path: Path) -> None:
+    store = ActionShareStore(tmp_path / "actions")
+    item = store.share(document_type=_document_type(), action=_action())
+    store.ack(item.id, status="accepted", acked_by="Pepe")
+    second = store.ack(item.id, status="accepted", acked_by="Luis")
+    assert second.acks["Pepe"]["status"] == "accepted"
+    assert second.acks["Luis"]["status"] == "accepted"
+    assert store.list(status="pending", for_user="Pepe") == []
+    assert store.list(status="pending", for_user="Luis") == []
 
 
 def test_portal_reads_share_token_from_env_file(tmp_path: Path, monkeypatch) -> None:

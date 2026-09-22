@@ -144,7 +144,7 @@ def create_app(
                     or "https://agentebc.malla.es",
                     token=current_settings().share_token or "",
                     timeout_seconds=2.0,
-                ).pending_count()
+                ).pending_count(for_user=share_sender_name(current_settings()))
             except Exception:
                 count = None
         return {
@@ -667,7 +667,10 @@ def create_app(
             try:
                 items = [
                     _inbox_item_view(item, registry)
-                    for item in share_client().inbox(status="pending")
+                    for item in share_client().inbox(
+                        status="pending",
+                        for_user=share_sender_name(current_settings()),
+                    )
                 ]
             except ActionShareError as exc:
                 error = str(exc)
