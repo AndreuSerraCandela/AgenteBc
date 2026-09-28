@@ -1,0 +1,58 @@
+TODO — Integrar Jev (TypeSafe / OpenRouter) en AgenteBc
+========================================================
+Revisar en unos días (aprox. finales sep / principios oct 2026).
+
+Contexto
+--------
+Jev es un modelo "System One" (TypeSafe): no genera informes en prosa; devuelve
+decisiones tipadas con probabilidades (choice, noul, score) sobre un "state"
+que enviamos. API vía OpenRouter Decisions (p. ej. typesafe/jev-1.13).
+Docs: https://jevai.dev/es/
+      https://openrouter.ai/docs/guides/community/jev-tutorial
+
+AgenteBc hoy usa LLM generativos para conclusiones (lm_studio, deepseek API,
+deepseek_web, google_ai_web) en llm_conclusions.py — prompt largo → texto en
+español (causa, pasos, confianza, etc.). Jev NO sustituye eso; complementa.
+
+Idea de arquitectura
+--------------------
+  Error BC + evidencia (PreviewMessage, DiagnosticReport, enrichments)
+       → Jev: 2–5 preguntas tipadas en una sola llamada
+       → Python: umbrales de probabilidad + reglas de negocio
+       → Si hace falta informe para el consultor → request_ai_conclusion (LLM actual)
+
+Casos de uso candidatos en AgenteBc
+-----------------------------------
+[ ] Triaje: registro vs permisos vs datos maestros vs personalización AL
+[ ] Confianza: ¿evidencia suficiente para sugerir acción sin escalar?
+[ ] Relevancia: priorizar source_matches antes de meter extractos al prompt LLM
+[ ] Pre-check acciones interactive: ¿contexto encaja con la receta? (extra a reglas)
+[ ] Enrutado: caso simple → LM local; complejo → DeepSeek API (opcional, fase 2)
+
+Tareas técnicas (piloto mínimo)
+-------------------------------
+[ ] Añadir env: AGENTEBC_OPENROUTER_API_KEY (o AGENTEBC_JEV_API_KEY), modelo opcional
+[ ] Nuevo módulo src/agentebc/jev_decisions.py — cliente POST OpenRouter /api/alpha/decisions
+[ ] Dataclass de resultado (preguntas → respuestas + probabilidades)
+[ ] Función triage_incident(state, questions) llamada ANTES de request_ai_conclusion
+[ ] Integrar en webapp.py: solo si Jev configurado; si no, flujo actual sin cambios
+[ ] Tests con mock HTTP (sin llamadas reales en CI)
+[ ] Documentar en .env.example y setup.html solo si exponemos algo al usuario (fase 1: solo .env)
+
+Preguntas abiertas para la revisión
+-----------------------------------
+- ¿OpenRouter aceptable para el equipo o hace falta otro canal?
+- ¿Umbrales iniciales (p. ej. noul < 0.7 → siempre LLM + aviso "baja confianza")?
+- ¿Mostrar triaje Jev en la UI del diagnóstico o solo logs internos?
+- ¿Pilotar con casos reales anónimos exportados desde un informe?
+
+Fuera de alcance (por ahora)
+----------------------------
+- Reemplazar AGENTEBC_AI_PROVIDER por jev
+- Informe completo de 6 secciones solo con Jev
+- Dependencia obligatoria en el instalador desktop (mantener opcional)
+
+Referencia código actual
+------------------------
+- build_llm_client / request_ai_conclusion: src/agentebc/llm_conclusions.py
+- Config IA: src/agentebc/config.py, templates/setup.html

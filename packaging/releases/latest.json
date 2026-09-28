@@ -1,7 +1,7 @@
 {
-  "version": "0.2.6",
+  "version": "0.2.7",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.6-setup.exe",
-  "sha256": "0749a8ef925fc6f6ebb1af2cd6e7f314b4de43cb4978ac2223082c249f83189e",
-  "release_notes": "El paso preguntar muestra el aviso en cuanto toca rellenar el diálogo, aunque el título no coincida al detalle. El instalador se publica por POST /api/releases/upload, no por git."
+  "download_url": "https://agentebc.malla.es/releases/AgenteBc-0.2.7-setup.exe",
+  "sha256": "07267adeb398ba2f32e39a81b83a3918ee4a0818fd650b9cf67456ce7bbde83f",
+  "release_notes": "Buzon de acciones compartidas por usuario (AGENTEBC_SHARE_USER); varios consultores pueden instalar la misma receta."
 }
