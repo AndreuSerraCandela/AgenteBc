@@ -632,6 +632,9 @@ _INBOX_PAGE = """
   <li style="border:1px solid #ddd;border-radius:6px;padding:14px;margin-bottom:12px;">
     <strong>{{ item.skill.get('label', '?') }}</strong>
     <span style="color:#666;">({{ item.skill.get('id', '?') }})</span>
+    <br><span style="font-size:13px;color:#555;">
+      De {{ item.from_user or 'consultor' }} · {{ item.formatted_created_at() or '—' }}
+    </span>
     {% if item.note %}<br><span style="font-size:13px;color:#555;">{{ item.note }}</span>{% endif %}
     <form method="post" action="{{ url_for('skill_inbox_install') }}" style="margin-top:10px;">
       <input type="hidden" name="share_id" value="{{ item.id }}">

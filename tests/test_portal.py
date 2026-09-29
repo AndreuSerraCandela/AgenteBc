@@ -167,7 +167,7 @@ def test_worker_upload_writes_worker_manifest(tmp_path: Path, monkeypatch) -> No
     created = client.post(
         "/api/releases/upload",
         data={
-            "file": (io.BytesIO(payload), "AgenteBcWorker-0.2.7-setup.exe"),
+            "file": (io.BytesIO(payload), "AgenteBcWorker-0.2.9-setup.exe"),
             "product": "worker",
             "release_notes": "Worker test",
         },
@@ -179,8 +179,8 @@ def test_worker_upload_writes_worker_manifest(tmp_path: Path, monkeypatch) -> No
     manifest = json.loads(
         (releases / "worker-latest.json").read_text(encoding="utf-8")
     )
-    assert manifest["version"] == "0.2.7"
-    assert (releases / "AgenteBcWorker-0.2.7-setup.exe").read_bytes() == payload
+    assert manifest["version"] == "0.2.9"
+    assert (releases / "AgenteBcWorker-0.2.9-setup.exe").read_bytes() == payload
 
 
 def test_skills_share_api(tmp_path: Path, monkeypatch) -> None:

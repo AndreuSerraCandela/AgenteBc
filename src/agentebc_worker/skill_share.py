@@ -21,6 +21,22 @@ class SkillShareError(ValueError):
     pass
 
 
+def format_share_timestamp(iso: str) -> str:
+    """ISO UTC → fecha y hora locales (dd/mm/aaaa HH:MM)."""
+    raw = (iso or "").strip()
+    if not raw:
+        return ""
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(raw)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone().strftime("%d/%m/%Y %H:%M")
+    except ValueError:
+        return iso
+
+
 @dataclass(frozen=True, slots=True)
 class SharedSkill:
     id: str
@@ -29,6 +45,9 @@ class SharedSkill:
     note: str
     status: str
     skill: dict[str, Any]
+
+    def formatted_created_at(self) -> str:
+        return format_share_timestamp(self.created_at)
 
     def as_dict(self) -> dict[str, Any]:
         return {

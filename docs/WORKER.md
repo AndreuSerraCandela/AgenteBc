@@ -21,7 +21,7 @@ Alinea `#define MyAppVersion` en `packaging/agentebc-worker.iss` con la versión
 Mismo token que acciones compartidas: `AGENTEBC_SHARE_TOKEN`.
 
 ```powershell
-python scripts/publish_release.py --product worker packaging/releases/AgenteBcWorker-0.2.7-setup.exe
+python scripts/publish_release.py --product worker packaging/releases/AgenteBcWorker-0.2.9-setup.exe
 ```
 
 Manifiesto público: `https://agentebc.malla.es/releases/worker-latest.json`
