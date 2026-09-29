@@ -1,0 +1,101 @@
+{
+  "outcomes": [
+    {
+      "number": "ML256899",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01325"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257065",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01320"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257097",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01348"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257156",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01362"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257279",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01341"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257303",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01379"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257325",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01235"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257335",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01234"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257366",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01429"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257397",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01417"
+      },
+      "attempts": 1
+    }
+  ],
+  "email_status": "Enviado a andreuserra@malla.es, mauel@malla.es, julian@malla.es",
+  "totals": {
+    "success": 10,
+    "error": 0,
+    "dry_run_skipped": 0,
+    "other": 0
+  }
+}

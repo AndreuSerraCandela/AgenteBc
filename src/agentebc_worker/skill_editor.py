@@ -729,7 +729,12 @@ def register_skill_routes(
 
     @app.get("/skills/inbox")
     def skill_inbox():
-        pending = inbox.list_pending()
+        from .skill_share import list_pending_from_portal, merge_pending_skills
+
+        pending = merge_pending_skills(
+            inbox.list_pending(),
+            list_pending_from_portal(),
+        )
         return render_template_string(
             _INBOX_PAGE,
             items=pending,
@@ -756,14 +761,25 @@ def register_skill_routes(
         skill_id = request.form.get("skill_id", "").strip()
         note = request.form.get("share_note", "").strip()
         try:
+            from .skill_share import SkillShareError, share_skill_via_portal
+
             skill = skill_store().get(skill_id)
-            item = inbox.share(skill, note=note)
+            remote = share_skill_via_portal(skill, note=note)
+            if remote is not None:
+                saved = f"Portal: {remote.id}"
+            else:
+                item = inbox.share(skill, note=note)
+                saved = f"Buzón local: {item.id}"
             return redirect(
                 url_for(
                     "skill_editor",
                     skill_id=skill.id,
-                    saved=f"Buzón: {item.id}",
+                    saved=saved,
                 )
+            )
+        except SkillShareError as exc:
+            return redirect(
+                url_for("skill_editor", skill_id=skill_id, error=str(exc))
             )
         except Exception as exc:
             return redirect(

@@ -1,0 +1,136 @@
+TODO — Módulo autónomo de registro + AgenteBc como back-office
+==============================================================
+Revisar semana del 29 sep / 6 oct 2026 (o la que toque “la semana que viene”).
+
+Contexto
+--------
+Producto distinto del flujo consultor (agentebc-desktop / “Ejecutar acción y
+diagnosticar”). Un servicio autónomo registra facturas (y otros tipos en el
+futuro) según criterios o programación; solo cuando hay error (o casos dudosos)
+invoca AgenteBc. AgenteBc diagnostica, intenta remedio acotado si existe, o
+escala a un consultor humano.
+
+Hoy AgenteBc:
+- Automatiza 1 documento × 1 acción (Playwright: web_preview.py).
+- Diagnostica sin modificar “por diagnóstico” (diagnosis.py → ProposedSolution
+  orientadas a revisión humana).
+- Buzón /inbox = recetas compartidas entre consultores (action_share), NO
+  cola de fallos de registro.
+- No hay listado OData por fechas, colas, scheduler ni API unificada de incidentes.
+
+Visión (dos piezas)
+-------------------
+  [Worker autónomo]                    [AgenteBc motor]
+  Cola / cron → OData list → Registrar → OK → fin
+                              ↓ error
+                         Incident JSON → diagnose (+ IA opcional)
+                              ↓
+                    ¿Remedio en catálogo + confianza alta?
+                         sí → acción correctiva → reintento (límite N)
+                         no → escalar consultor (nueva cola de casos)
+
+Idea de arquitectura (detalle)
+------------------------------
+  Criterios (fechas, empresa, tipo doc) — manual, DSL @menciones o job JSON
+       → DocumentReader.list_* (NUEVO: $filter OData, p. ej. postingDate)
+       → BusinessCentralWebPreview.run por documento (misma receta JSON)
+       → Estado por doc: pending | running | posted | failed | remediating | escalated
+
+  Fallo → Incident (models.py) + PreviewMessage + screenshot + metadata
+       → DiagnosticService + enrichments (+ Jev triaje cuando exista: todo.txt)
+       → Política de cierre (NUEVO): auto_remediate | retry | escalate
+
+Casos de uso candidatos
+-----------------------
+[ ] Lote: registrar facturas venta con postingDate entre dos fechas
+[ ] Job programado: día + hora (ventana de mantenimiento / cierre contable)
+[ ] Reintento automático solo con remedio aprobado en catálogo
+[ ] Escalado: consultor ve caso (doc, error, informe, captura), no solo receta
+[ ] Métricas operación: registradas / fallidas / escaladas / reintentos
+
+Fases sugeridas
+---------------
+Fase 0 — Alineación (esta revisión)
+[ ] Definir nombre del servicio (p. ej. agentebc-worker vs paquete aparte)
+[ ] Empresa(s), usuario de servicio BC, dónde corre (servidor / RDP / contenedor)
+[ ] Política: parar al primer error vs continuar; máximo docs por job
+[ ] Qué errores NUNCA auto-remediar (periodo cerrado, permisos, etc.)
+
+Fase 1 — Worker mínimo (sin auto-resolución)
+[ ] list_documents(company, DocumentTypeDefinition, filtros OData)
+[ ] JobSpec JSON (type_id, action_id, company, filter, limit, dry_run)
+[ ] Ejecutor secuencial (1 navegador; no reutilizar _preview_lock de webapp)
+[ ] Persistencia cola (SQLite en ~/.agentebc/ o ruta configurable)
+[ ] Log + informe por documento (JSON/CSV); capturas en reports_dir
+[ ] Entry point: agentebc-worker run-job | enqueue (CLI o servicio Windows)
+
+Fase 2 — Integración AgenteBc
+[ ] POST /api/incidents (o librería interna) → build_diagnostic_service().diagnose
+[ ] Payload alineado con webapp _preview_page_context (Incident + evidencia)
+[ ] Estados failed → awaiting_diagnosis → diagnosed → escalated | remediating
+[ ] Opcional: request_ai_conclusion solo para escalados o resumen consultor
+
+Fase 3 — Escalado humano
+[ ] Cola “casos” (distinta de action_share): id, incident, report, links BC
+[ ] Notificación (email / portal / webhook) — reutilizar infra malla.es si aplica
+[ ] UI mínima consultor: listar, marcar resuelto, notas (no bloqueante para Fase 1)
+
+Fase 4 — Remedios automáticos (acotado)
+[ ] Catálogo error_pattern → remedio (action_id + field_edits / reglas datos)
+[ ] Integración Jev (todo.txt): triaje antes de auto-remediar
+[ ] Reintento con tope; auditoría quién/qué cambió
+[ ] NO asumir que la mayoría se resuelven solos — diseño pessimistic
+
+Fase 5 — Lenguaje natural / @menciones (opcional)
+[ ] Alias: @facturas_venta → sales_invoice, @registra → registrar_factura
+[ ] @Fecha_Registro → postingDate (validar vs extensión BC del cliente)
+[ ] Parser reglas → JobSpec; LLM solo si validación Python pasa
+
+Preguntas abiertas para la revisión
+-----------------------------------
+- ¿Mismo repo (src/agentebc_worker/) o proyecto Python separado que depende de agente-bc?
+- ¿Worker llama AgenteBc por HTTP en localhost o importa librería en el mismo proceso?
+- ¿Credenciales: mismo .env que consultores o perfil AGENTEBC_WORKER_*?
+- ¿Programación: APScheduler dentro del servicio vs Tareas programadas Windows?
+- ¿Escalado: buzón nuevo en portal, Teams, email, o ticket externo?
+- ¿Catálogo inicial de remedios: cuántos patrones reales tenéis documentados?
+- ¿Relación con todo.txt (Jev): worker usa triaje desde Fase 2 o solo Fase 4?
+
+Fuera de alcance (por ahora)
+----------------------------
+- Sustituir el desktop del consultor por el worker
+- Paralelizar varios navegadores Playwright sin diseño de aislamiento
+- Auto-registrar sin límite ni confirmación en entornos productivos (piloto con dry_run)
+- “Resolver todo con LLM” sin catálogo de remedios aprobados
+- Reutilizar /inbox de recetas como cola de incidentes (conceptos distintos)
+
+Riesgos / recordatorios
+-----------------------
+- registrar_factura (document_types.json) tiene auto_confirm y modifica BC
+- DiagnosticService no ejecuta remedios; hay que construir capa de política + Playwright
+- Sesión BC web estable en servidor (RDP, cookies, 2FA si aplica)
+- Concurrencia: hoy webapp asume una preview a la vez
+
+Referencia código actual
+------------------------
+- Recetas y acciones: config/document_types.json, document_types.py
+- OData un documento: documents.py (find_document — ampliar listado)
+- Automatización web: web_preview.py (BusinessCentralWebPreview.run)
+- Incidente tras error: webapp.py _preview_page_context + models.Incident
+- Diagnóstico: diagnosis.py, cli.py diagnose
+- IA consultor: llm_conclusions.py
+- Buzón recetas (NO incidentes): action_share.py, templates/inbox.html
+- Agente remoto AL (NO registro BC): bc_agent_source.py
+
+Relación con todo.txt (Jev)
+---------------------------
+- Jev: triaje y confianza antes de escalar vs auto-remediar
+- Worker autónomo: consume diagnóstico; Jev encaja en Fase 2–4 del worker
+- Revisar ambos todos en la misma sesión para no duplicar esfuerzo en “triaje”
+
+Checklist rápido para la reunión de revisión
+--------------------------------------------
+[ ] ¿Go Fase 1 piloto en un entorno (TEST)?
+[ ] ¿Un job real acordado (empresa + rango fechas + tope N facturas)?
+[ ] ¿Responsable operación (quién mira escalados)?
+[ ] ¿Fecha objetivo piloto Fase 1?

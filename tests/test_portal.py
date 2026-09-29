@@ -153,3 +153,65 @@ def test_upload_release_accepts_chunks(tmp_path: Path, monkeypatch) -> None:
     assert json.loads((releases / "latest.json").read_text(encoding="utf-8"))[
         "sha256"
     ] == digest
+
+
+def test_worker_upload_writes_worker_manifest(tmp_path: Path, monkeypatch) -> None:
+    releases = tmp_path / "releases"
+    releases.mkdir()
+    monkeypatch.setenv("AGENTEBC_RELEASES_DIR", str(releases))
+    monkeypatch.setenv("AGENTEBC_SHARE_TOKEN", "secret-token")
+    client = create_portal_app().test_client()
+    payload = b"worker-installer"
+    headers = {"X-AgenteBc-Share-Token": "secret-token"}
+
+    created = client.post(
+        "/api/releases/upload",
+        data={
+            "file": (io.BytesIO(payload), "AgenteBcWorker-0.2.7-setup.exe"),
+            "product": "worker",
+            "release_notes": "Worker test",
+        },
+        content_type="multipart/form-data",
+        headers=headers,
+    )
+    assert created.status_code == 201
+    assert created.json["product"] == "worker"
+    manifest = json.loads(
+        (releases / "worker-latest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["version"] == "0.2.7"
+    assert (releases / "AgenteBcWorker-0.2.7-setup.exe").read_bytes() == payload
+
+
+def test_skills_share_api(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENTEBC_WORKER_SKILLS_SHARE_DIR", str(tmp_path / "skills"))
+    monkeypatch.setenv("AGENTEBC_SHARE_TOKEN", "secret-token")
+    client = create_portal_app().test_client()
+    skill = {
+        "schema_version": 1,
+        "id": "demo_skill",
+        "label": "Demo",
+        "spec": {
+            "company": "X",
+            "type_id": "sales_invoice",
+            "action_id": "registrar_factura",
+            "limit": 1,
+        },
+        "report": {"fields": [], "notify_emails": []},
+    }
+    denied = client.post("/api/skills/share", json={"skill": skill})
+    assert denied.status_code == 401
+    created = client.post(
+        "/api/skills/share",
+        json={"skill": skill, "note": "Prueba"},
+        headers={"X-AgenteBc-Share-Token": "secret-token"},
+    )
+    assert created.status_code == 201
+    share_id = created.json["id"]
+    inbox = client.get(
+        "/api/skills/inbox",
+        headers={"X-AgenteBc-Share-Token": "secret-token"},
+    )
+    assert inbox.status_code == 200
+    assert inbox.json["count"] == 1
+    assert inbox.json["items"][0]["id"] == share_id

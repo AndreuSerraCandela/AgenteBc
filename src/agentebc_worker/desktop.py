@@ -43,6 +43,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Solo servidor HTTP (sin ventana WebView)",
     )
+    parser.add_argument(
+        "--no-update-check",
+        action="store_true",
+        help="No comprobar worker-latest.json al iniciar",
+    )
     args = parser.parse_args(argv)
 
     paths = configure_desktop_environment()
@@ -59,6 +64,16 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("Worker — datos en %s", paths.user_root)
     logger.info("Configuración: %s", paths.env_file)
+
+    if not args.no_update_check:
+        try:
+            from agentebc import __version__
+            from agentebc.updater import check_and_offer_worker_update
+
+            if check_and_offer_worker_update(current_version=__version__):
+                return 0
+        except Exception:
+            logger.warning("No se pudo comprobar actualizaciones del worker", exc_info=True)
 
     try:
         app = create_app()

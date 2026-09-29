@@ -151,3 +151,108 @@ def skills_share_dir() -> Path:
     if configured:
         return Path(configured).expanduser().resolve()
     return _DEFAULT_DIR.resolve()
+
+
+def portal_base_url() -> str | None:
+    url = (
+        os.getenv("AGENTEBC_SHARE_URL", "").strip()
+        or os.getenv("AGENTEBC_PORTAL_URL", "").strip()
+    )
+    return url.rstrip("/") if url else None
+
+
+def _portal_share_token() -> str:
+    return os.getenv("AGENTEBC_SHARE_TOKEN", "").strip()
+
+
+def share_skill_via_portal(
+    skill: WorkerSkill,
+    *,
+    note: str = "",
+    from_user: str = "",
+) -> SharedSkill | None:
+    """POST /api/skills/share si hay URL y token; si no, None (usar buzón local)."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    base = portal_base_url()
+    token = _portal_share_token()
+    if not base or not token:
+        return None
+    body = json.dumps(
+        {
+            "skill": skill.as_dict(),
+            "note": note,
+            "from_user": from_user or "consultor",
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base}/api/skills/share",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json; charset=utf-8",
+            "X-AgenteBc-Share-Token": token,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
+        raise SkillShareError(f"No se pudo publicar el skill en el portal: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SkillShareError("Respuesta del portal no válida")
+    return SharedSkill.from_dict(payload)
+
+
+def list_pending_from_portal() -> tuple[SharedSkill, ...]:
+    import json
+    import urllib.error
+    import urllib.request
+
+    base = portal_base_url()
+    token = _portal_share_token()
+    if not base or not token:
+        return ()
+    request = urllib.request.Request(
+        f"{base}/api/skills/inbox?status=pending",
+        headers={
+            "Accept": "application/json",
+            "X-AgenteBc-Share-Token": token,
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+        return ()
+    if not isinstance(payload, dict):
+        return ()
+    items_raw = payload.get("items")
+    if not isinstance(items_raw, list):
+        return ()
+    items: list[SharedSkill] = []
+    for raw in items_raw:
+        if isinstance(raw, dict):
+            try:
+                items.append(SharedSkill.from_dict(raw))
+            except (SkillShareError, ValueError):
+                continue
+    return tuple(items)
+
+
+def merge_pending_skills(
+    local: tuple[SharedSkill, ...],
+    remote: tuple[SharedSkill, ...],
+) -> tuple[SharedSkill, ...]:
+    seen = {item.id for item in local}
+    merged = list(local)
+    for item in remote:
+        if item.id not in seen:
+            merged.append(item)
+            seen.add(item.id)
+    merged.sort(key=lambda row: row.created_at, reverse=True)
+    return tuple(merged)

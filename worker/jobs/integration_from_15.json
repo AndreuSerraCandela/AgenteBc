@@ -1,0 +1,23 @@
+{
+  "company": "Malla Publicidad",
+  "type_id": "sales_invoice",
+  "action_id": "registrar_factura",
+  "date_filter": {
+    "field": "Posting_Date",
+    "from": "2026-09-15",
+    "to": "2026-09-30"
+  },
+  "extra_odata_filters": {
+    "Esperar_Orden_Cliente": "No",
+    "Status": "Open"
+  },
+  "report_odata_fields": {
+    "number": "No",
+    "n_x00ba__contrato": "N_x00BA__Contrato"
+  },
+  "odata_service": "FacturaVenta",
+  "odata_key_field": "No",
+  "limit": 10,
+  "dry_run": false,
+  "on_error": "report_and_continue"
+}

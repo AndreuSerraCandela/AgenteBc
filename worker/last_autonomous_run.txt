@@ -1,0 +1,116 @@
+{
+  "preview_summary": "Empresa: Malla Publicidad\nTipo: Factura de venta (sales_invoice)\nServicio OData: FacturaVenta\nCampo clave OData: No\nAcci├│n: Registrar (registrar_factura)\nModo: ejecuci├│n real\nL├¡mite: 10 documentos\nFechas (Posting_Date): 2026-09-15 ÔÇª 2026-09-30\nDocumentos que coinciden: 10 (hay m├ís; aumente limit o acote filtros)",
+  "dry_run": false,
+  "outcomes": [
+    {
+      "number": "ML257409",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01406"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257435",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01401"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257481",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01409"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257492",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01434"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257505",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01432"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257606",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01331"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257621",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01469"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257635",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01403"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257659",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01479"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257705",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01473"
+      },
+      "attempts": 1
+    }
+  ]
+}
+
+--- Verificaci├│n OData ---
+ML257409: informe=error odata=PENDIENTE (Open) coherente=s├¡
+  error: No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.
+ML257435: informe=error odata=PENDIENTE (Open) coherente=s├¡
+  error: No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.
+ML257481: informe=error odata=PENDIENTE (Open) coherente=s├¡
+  error: No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.
+ML257492: informe=error odata=PENDIENTE (Open) coherente=s├¡
+  error: No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.
+ML257505: informe=error odata=PENDIENTE (Open) coherente=s├¡
+  error: No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.
+ML257606: informe=error odata=PENDIENTE (Open) coherente=s├¡
+  error: No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.
+ML257621: informe=error odata=PENDIENTE (Open) coherente=s├¡
+  error: No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.
+ML257635: informe=error odata=PENDIENTE (Open) coherente=s├¡
+  error: No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.
+ML257659: informe=success odata=registrada coherente=s├¡
+ML257705: informe=success odata=registrada coherente=s├¡

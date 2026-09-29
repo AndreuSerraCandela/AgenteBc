@@ -4,7 +4,6 @@ import argparse
 import hashlib
 import json
 import os
-import re
 from pathlib import Path
 
 from flask import Flask, abort, jsonify, render_template, request, send_from_directory
@@ -17,15 +16,12 @@ from .action_share import (
     register_action_share_routes,
     share_token,
 )
+from .release_products import PRODUCTS, ProductId, normalize_product_id
+from .skill_share_portal import register_skill_share_routes
 from .updater import ReleaseManifest
 
 _DEFAULT_RELEASES_DIR = Path(__file__).resolve().parents[2] / "packaging" / "releases"
-_INSTALLER_NAME = re.compile(
-    r"^AgenteBc-(?P<version>\d+\.\d+\.\d+)-setup\.exe$",
-    re.IGNORECASE,
-)
 _MAX_INSTALLER_BYTES = 100 * 1024 * 1024
-_PUBLIC_RELEASES_BASE = "https://agentebc.malla.es/releases"
 _releases_dir_cache: tuple[str, str] | None = None
 
 
@@ -73,8 +69,8 @@ def _seed_release_manifest(dest: Path, source: Path) -> None:
         return
 
 
-def load_release_manifest() -> ReleaseManifest | None:
-    manifest_path = releases_dir() / "latest.json"
+def load_release_manifest(product: ProductId = "agente") -> ReleaseManifest | None:
+    manifest_path = releases_dir() / PRODUCTS[product].manifest_filename
     if not manifest_path.is_file():
         return None
     try:
@@ -106,26 +102,27 @@ def create_portal_app() -> Flask:
 
     @app.get("/")
     def portal_home():
-        manifest = load_release_manifest()
+        manifest = load_release_manifest("agente")
+        worker_manifest = load_release_manifest("worker")
         ready = bool(manifest and installer_available(manifest))
+        worker_ready = bool(worker_manifest and installer_available(worker_manifest))
         return render_template(
             "portal.html",
             manifest=manifest,
             installer_ready=ready,
+            worker_manifest=worker_manifest,
+            worker_installer_ready=worker_ready,
             releases_dir=str(releases_dir()),
             portal_version=__version__,
         )
 
     @app.get("/releases/latest.json")
     def latest_manifest():
-        manifest_path = releases_dir() / "latest.json"
-        if not manifest_path.is_file():
-            abort(404, description="No hay manifiesto de versión publicado")
-        return send_from_directory(
-            releases_dir(),
-            "latest.json",
-            mimetype="application/json",
-        )
+        return _serve_manifest_file("agente")
+
+    @app.get("/releases/worker-latest.json")
+    def worker_latest_manifest():
+        return _serve_manifest_file("worker")
 
     @app.get("/releases/<path:filename>")
     def release_file(filename: str):
@@ -137,30 +134,43 @@ def create_portal_app() -> Flask:
 
     @app.get("/api/portal-info")
     def portal_info():
-        manifest = load_release_manifest()
+        manifest = load_release_manifest("agente")
+        worker_manifest = load_release_manifest("worker")
         return jsonify(
             {
                 "portal": "agentebc-download",
                 "portal_version": __version__,
                 "releases_dir": str(releases_dir()),
-                "manifest": (
-                    {
-                        "version": manifest.version,
-                        "download_url": manifest.download_url,
-                        "release_notes": manifest.release_notes,
-                        "installer_ready": installer_available(manifest),
-                    }
-                    if manifest
-                    else None
-                ),
+                "manifest": _manifest_api_payload(manifest),
+                "worker_manifest": _manifest_api_payload(worker_manifest),
                 "share_enabled": bool(share_token()),
                 "actions_dir": _safe_actions_dir(),
             }
         )
 
     register_action_share_routes(app)
+    register_skill_share_routes(app)
     register_release_upload_routes(app)
     return app
+
+
+def _manifest_api_payload(manifest: ReleaseManifest | None) -> dict[str, object] | None:
+    if manifest is None:
+        return None
+    return {
+        "version": manifest.version,
+        "download_url": manifest.download_url,
+        "release_notes": manifest.release_notes,
+        "installer_ready": installer_available(manifest),
+    }
+
+
+def _serve_manifest_file(product: ProductId):
+    name = PRODUCTS[product].manifest_filename
+    manifest_path = releases_dir() / name
+    if not manifest_path.is_file():
+        abort(404, description=f"No hay manifiesto publicado ({name})")
+    return send_from_directory(releases_dir(), name, mimetype="application/json")
 
 
 def register_release_upload_routes(app: Flask) -> None:
@@ -173,13 +183,18 @@ def register_release_upload_routes(app: Flask) -> None:
         if uploaded is None or not (uploaded.filename or "").strip():
             return _json_error("Falta el fichero del instalador", 400)
         filename = Path(uploaded.filename).name
-        match = _INSTALLER_NAME.match(filename)
-        if match is None:
+        try:
+            product = normalize_product_id(request.form.get("product"))
+        except ValueError as exc:
+            return _json_error(str(exc), 400)
+        product_def = PRODUCTS[product]
+        filename_version = product_def.parse_installer_filename(filename)
+        if filename_version is None:
             return _json_error(
-                "El nombre debe ser AgenteBc-X.Y.Z-setup.exe",
+                f"Nombre no válido para {product_def.label}. "
+                f"Use el patrón del instalador Inno (p. ej. AgenteBcWorker-1.0.0-setup.exe).",
                 400,
             )
-        filename_version = match.group("version")
         version = (request.form.get("version") or filename_version).strip()
         if version != filename_version:
             return _json_error(
@@ -223,16 +238,17 @@ def register_release_upload_routes(app: Flask) -> None:
             os.replace(partial, dest)
             download_url = (
                 request.form.get("download_url") or ""
-            ).strip() or f"{_PUBLIC_RELEASES_BASE}/{filename}"
+            ).strip() or product_def.default_download_url(filename)
             manifest = {
                 "version": version,
+                "product": product,
                 "min_version": (request.form.get("min_version") or "0.2.0").strip()
                 or "0.2.0",
                 "download_url": download_url,
                 "sha256": digest,
                 "release_notes": (request.form.get("release_notes") or "").strip(),
             }
-            (folder / "latest.json").write_text(
+            (folder / product_def.manifest_filename).write_text(
                 json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
                 encoding="utf-8",
             )
@@ -241,6 +257,7 @@ def register_release_upload_routes(app: Flask) -> None:
         return (
             jsonify(
                 {
+                    "product": product,
                     "version": version,
                     "filename": filename,
                     "sha256": digest,

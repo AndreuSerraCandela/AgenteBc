@@ -1,0 +1,24 @@
+{
+  "preview_summary": "Empresa: Malla Publicidad\nTipo: Factura de venta (sales_invoice)\nServicio OData: FacturaVenta\nCampo clave OData: No\nAcción: Registrar (registrar_factura)\nModo: ejecución real\nLímite: 2 documentos\nFechas (Posting_Date): filtro dinámico «current_month» → 2026-09-01 … 2026-09-30\nDocumentos que coinciden: 2 (hay más; aumente limit o acote filtros)",
+  "dry_run": false,
+  "outcomes": [
+    {
+      "number": "ML256899",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01325"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257065",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01320"
+      },
+      "attempts": 1
+    }
+  ]
+}

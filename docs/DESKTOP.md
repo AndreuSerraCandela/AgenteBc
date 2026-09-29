@@ -35,6 +35,10 @@ Publica en el servidor:
 - `https://agentebc.malla.es/releases/latest.json`
 - `https://agentebc.malla.es/releases/AgenteBc-x.y.z-setup.exe`
 
+**AgenteBc Worker** (registro en lote): ver `docs/WORKER.md` — manifiesto
+`worker-latest.json`, instalador `AgenteBcWorker-x.y.z-setup.exe`, API
+`/api/skills/share`.
+
 Plantilla: `packaging/releases/latest.json.example`
 
 Al iniciar, la app consulta el manifiesto. Si hay versión nueva, pregunta si

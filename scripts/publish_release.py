@@ -62,7 +62,17 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Publica un instalador en POST /api/releases/upload",
     )
-    parser.add_argument("installer", type=Path, help="Ruta al AgenteBc-X.Y.Z-setup.exe")
+    parser.add_argument(
+        "installer",
+        type=Path,
+        help="Ruta al instalador (*-X.Y.Z-setup.exe)",
+    )
+    parser.add_argument(
+        "--product",
+        choices=("agente", "worker"),
+        default="agente",
+        help="agente = AgenteBc-…-setup.exe; worker = AgenteBcWorker-…-setup.exe",
+    )
     parser.add_argument(
         "--portal",
         default=os.getenv("AGENTEBC_SHARE_URL", _DEFAULT_PORTAL).strip()
@@ -72,6 +82,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--release-notes", default="", help="Notas de la versión")
     parser.add_argument("--min-version", default="0.2.0")
     return parser
+
+
+def _parse_installer_version(filename: str, product: str) -> str | None:
+    if product == "worker":
+        prefix, suffix = "AgenteBcWorker-", "-setup.exe"
+    else:
+        prefix, suffix = "AgenteBc-", "-setup.exe"
+    if not (filename.startswith(prefix) and filename.endswith(suffix)):
+        return None
+    return filename[len(prefix) : -len(suffix)]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -88,16 +108,21 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
     filename = installer.name
-    prefix = "AgenteBc-"
-    suffix = "-setup.exe"
-    if not (filename.startswith(prefix) and filename.endswith(suffix)):
-        print("El fichero debe llamarse AgenteBc-X.Y.Z-setup.exe", file=sys.stderr)
+    version = _parse_installer_version(filename, args.product)
+    if not version:
+        expected = (
+            "AgenteBcWorker-X.Y.Z-setup.exe"
+            if args.product == "worker"
+            else "AgenteBc-X.Y.Z-setup.exe"
+        )
+        print(f"El fichero debe llamarse {expected}", file=sys.stderr)
         return 1
-    version = filename[len(prefix) : -len(suffix)]
     digest = _sha256(installer)
     boundary = "----AgenteBcReleaseBoundary"
-    notes = args.release_notes or f"AgenteBc {version}"
+    label = "AgenteBc Worker" if args.product == "worker" else "AgenteBc"
+    notes = args.release_notes or f"{label} {version}"
     fields = {
+        "product": args.product,
         "version": version,
         "min_version": args.min_version,
         "sha256": digest,

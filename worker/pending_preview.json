@@ -1,0 +1,68 @@
+{
+  "spec": {
+    "company": "Malla Publicidad",
+    "type_id": "sales_invoice",
+    "action_id": "registrar_factura",
+    "date_filter": {
+      "field": "Posting_Date",
+      "dynamic": "current_month"
+    },
+    "extra_odata_filters": {
+      "Esperar_Orden_Cliente": "No",
+      "Estado_Contrato": "Firmado",
+      "Document_Type": "Invoice"
+    },
+    "report_odata_fields": {
+      "number": "No",
+      "n_x00ba__contrato": "N_x00BA__Contrato"
+    },
+    "odata_service": "FacturaVenta",
+    "odata_key_field": "No",
+    "limit": 10,
+    "dry_run": false,
+    "on_error": "report_and_continue",
+    "before_action_field_edits": [
+      {
+        "field_label": "Fecha registro",
+        "value": "today"
+      }
+    ],
+    "after_action_steps": [
+      {
+        "kind": "odata_query",
+        "service": "FacturasRegistradas",
+        "filter_field": "Pre_Assigned_No",
+        "filter_value": "{number}",
+        "expect": "at_least_one_row",
+        "save_for_report": {
+          "odata_field": "No",
+          "report_key": "no_factura_registrada"
+        }
+      }
+    ]
+  },
+  "type_label": "Factura de venta",
+  "action_label": "Registrar",
+  "resolved_dates": {
+    "dynamic": "current_month",
+    "from": "2026-09-01",
+    "to": "2026-09-30"
+  },
+  "document_count": 10,
+  "sample_numbers": [
+    "ML257397",
+    "ML257825",
+    "ML257864",
+    "ML257878",
+    "ML257914",
+    "ML257930",
+    "ML257955",
+    "ML257972",
+    "ML257982",
+    "ML257996"
+  ],
+  "truncated": true,
+  "odata_list_error": null,
+  "summary": "Empresa: Malla Publicidad\nTipo: Factura de venta (sales_invoice)\nServicio OData: FacturaVenta\nCampo clave OData: No\nAcción: Registrar (registrar_factura)\nModo: ejecución real\nLímite: 10 documentos\nFechas (Posting_Date): filtro dinámico «current_month» → 2026-09-01 … 2026-09-30\nDocumentos que coinciden: 10 (hay más; aumente limit o acote filtros)\nEdición en ficha antes de la acción: Fecha registro → today",
+  "skill_id": "malla_publicidad_facturar_ventas"
+}

@@ -1,0 +1,85 @@
+{
+  "preview_summary": "Empresa: Malla Publicidad\nTipo: Factura de venta (sales_invoice)\nServicio OData: FacturaVenta\nCampo clave OData: No\nAcci├│n: Registrar (registrar_factura)\nModo: ejecuci├│n real\nL├¡mite: 3 documentos\nFechas (Posting_Date): 2026-09-15 ÔÇª 2026-09-30\nDocumentos que coinciden: 3 (hay m├ís; aumente limit o acote filtros)",
+  "dry_run": false,
+  "outcomes": [
+    {
+      "number": "ML257303",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01379"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257409",
+      "outcome": "error",
+      "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01406"
+      },
+      "attempts": 1
+    },
+    {
+      "number": "ML257423",
+      "outcome": "success",
+      "error": null,
+      "fields": {
+        "n_x00ba__contrato": "MPC25-01400"
+      },
+      "attempts": 1
+    }
+  ],
+  "skill_report": {
+    "skill_id": "malla_publicidad_facturar_ventas",
+    "skill_label": "Facturar ventas Malla Publicidad",
+    "generated_at": "2026-09-28T12:02:29.199223+00:00",
+    "dry_run": false,
+    "preview_summary": "Empresa: Malla Publicidad\nTipo: Factura de venta (sales_invoice)\nServicio OData: FacturaVenta\nCampo clave OData: No\nAcci├│n: Registrar (registrar_factura)\nModo: ejecuci├│n real\nL├¡mite: 3 documentos\nFechas (Posting_Date): 2026-09-15 ÔÇª 2026-09-30\nDocumentos que coinciden: 3 (hay m├ís; aumente limit o acote filtros)",
+    "totals": {
+      "success": 2,
+      "error": 1,
+      "dry_run_skipped": 0,
+      "other": 0
+    },
+    "field_labels": {
+      "number": "N┬║ documento",
+      "n_x00ba__contrato": "N┬║ Contrato"
+    },
+    "rows": [
+      {
+        "number": "ML257303",
+        "outcome": "success",
+        "error": null,
+        "attempts": 1,
+        "N┬║ documento": "ML257303",
+        "N┬║ Contrato": "MPC25-01379"
+      },
+      {
+        "number": "ML257409",
+        "outcome": "error",
+        "error": "No puede asignar n├║meros nuevos de la serie V-FAC+ en una fecha anterior a 28/09/26.",
+        "attempts": 1,
+        "N┬║ documento": "ML257409",
+        "N┬║ Contrato": "MPC25-01406"
+      },
+      {
+        "number": "ML257423",
+        "outcome": "success",
+        "error": null,
+        "attempts": 1,
+        "N┬║ documento": "ML257423",
+        "N┬║ Contrato": "MPC25-01400"
+      }
+    ],
+    "notify_emails": [
+      "andreuserra@malla.es",
+      "mauel@malla.es",
+      "julian@malla.es"
+    ],
+    "llm_summary": "(IA no disponible: Este informe requiere lm_studio o deepseek API, no IA web)",
+    "email_status": "Enviado a andreuserra@malla.es, mauel@malla.es, julian@malla.es",
+    "report_path": "C:\\Users\\Andres\\Source\\Python\\AgenteBc\\worker\\reports\\batch-malla_publicidad_facturar_ventas-20260928T120229.json"
+  },
+  "skill_postrun_summary": "Informe guardado: C:\\Users\\Andres\\Source\\Python\\AgenteBc\\worker\\reports\\batch-malla_publicidad_facturar_ventas-20260928T120229.json ┬À Errores: 1 ┬À Resumen IA incluido en informe. ┬À Enviado a andreuserra@malla.es, mauel@malla.es, julian@malla.es"
+}

@@ -17,6 +17,9 @@ from . import __version__
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MANIFEST_URL = "https://agentebc.malla.es/releases/latest.json"
+_DEFAULT_WORKER_MANIFEST_URL = (
+    "https://agentebc.malla.es/releases/worker-latest.json"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +50,13 @@ class ReleaseManifest:
 
 def manifest_url() -> str:
     return os.getenv("AGENTEBC_UPDATE_MANIFEST_URL", _DEFAULT_MANIFEST_URL).strip()
+
+
+def worker_manifest_url() -> str:
+    return os.getenv(
+        "AGENTEBC_WORKER_UPDATE_MANIFEST_URL",
+        _DEFAULT_WORKER_MANIFEST_URL,
+    ).strip()
 
 
 def fetch_latest_release(
@@ -141,6 +151,7 @@ def check_and_offer_update(
     current_version: str = __version__,
     prompt: Callable[[str, str], bool] | None = None,
     url: str | None = None,
+    app_label: str = "AgenteBc",
 ) -> bool:
     manifest = update_available(current_version=current_version, url=url)
     if manifest is None:
@@ -148,18 +159,31 @@ def check_and_offer_update(
 
     notes = manifest.release_notes or "Mejoras y correcciones."
     question = (
-        f"Hay una nueva versión de AgenteBc ({manifest.version}).\n\n"
+        f"Hay una nueva versión de {app_label} ({manifest.version}).\n\n"
         f"Versión actual: {current_version}\n\n"
         f"{notes}\n\n"
         "¿Descargar e instalar ahora?"
     )
     ask = prompt or prompt_windows_yes_no
-    if not ask("Actualización de AgenteBc", question):
+    if not ask(f"Actualización de {app_label}", question):
         return False
 
     installer = download_installer(manifest)
     launch_installer(installer)
     return True
+
+
+def check_and_offer_worker_update(
+    *,
+    current_version: str = __version__,
+    prompt: Callable[[str, str], bool] | None = None,
+) -> bool:
+    return check_and_offer_update(
+        current_version=current_version,
+        prompt=prompt,
+        url=worker_manifest_url(),
+        app_label="AgenteBc Worker",
+    )
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:

@@ -126,12 +126,42 @@
     </section>
 
     <section>
+      <h2>AgenteBc Worker (registro en lote)</h2>
+      <p style="color:#444;margin-top:0">
+        Para usuarios que ejecutan skills de facturación/registro: portal simple en
+        <code>/portal</code> dentro de la app Worker.
+      </p>
+      {% if worker_manifest %}
+        <div class="version">Versión {{ worker_manifest.version }}</div>
+        {% if worker_installer_ready %}
+          <a class="download-btn" href="/releases/{{ worker_manifest.download_url.split('/')[-1] }}">
+            Descargar Worker {{ worker_manifest.version }}
+          </a>
+        {% else %}
+          <a class="download-btn disabled" href="#" aria-disabled="true">
+            Instalador Worker en preparación
+          </a>
+        {% endif %}
+        {% if worker_manifest.release_notes %}
+          <p style="margin-top:18px">{{ worker_manifest.release_notes }}</p>
+        {% endif %}
+      {% else %}
+        <div class="notice">
+          No hay <code>worker-latest.json</code> publicado. Build:
+          <code>scripts\build-worker.ps1</code> y subida con
+          <code>python scripts/publish_release.py --product worker …</code>
+        </div>
+      {% endif %}
+    </section>
+
+    <section>
       <h2>Después de instalar</h2>
       <ol>
-        <li>Abre <strong>AgenteBc</strong> desde el menú Inicio o el escritorio.</li>
-        <li>Abre <strong>Configuración general</strong> en la app (no hace falta editar el <code>.env</code> manualmente).</li>
-        <li>Para Google Modo IA o DeepSeek web, deja Chrome con depuración en el puerto 9222; la app lo gestiona sola.</li>
-        <li>Las actualizaciones se comprueban al iniciar contra <code>/releases/latest.json</code>.</li>
+        <li><strong>AgenteBc</strong> — consultor: configuración, IA web, acciones compartidas.</li>
+        <li><strong>AgenteBc Worker</strong> — usuario final: abrir la app, elegir skill, Ejecutar en el portal.</li>
+        <li>Datos y <code>.env</code> en <code>%LOCALAPPDATA%\AgenteBC\</code> (compartido entre ambas apps).</li>
+        <li>Actualizaciones: <code>latest.json</code> (Agente) y <code>worker-latest.json</code> (Worker).</li>
+        <li>Skills del consultor: <code>python scripts/publish_skill.py</code> → buzón en el Worker del usuario.</li>
       </ol>
     </section>
 
