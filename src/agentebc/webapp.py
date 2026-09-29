@@ -124,11 +124,16 @@ def create_app(
     def document_reader() -> DocumentReader:
         return DocumentReader(BusinessCentralReadClient(current_settings()))
 
-    def load_companies(fallback: str | None = None) -> list[str]:
+    def load_companies(
+        fallback: str | None = None,
+    ) -> tuple[list[str], str | None]:
         try:
-            return document_reader().list_companies()
-        except Exception:
-            return [fallback] if fallback else []
+            return document_reader().list_companies(), None
+        except Exception as exc:
+            fb = (fallback or current_settings().company or "").strip()
+            if fb:
+                return [fb], str(exc)
+            return [], str(exc)
 
     def share_client() -> ActionShareClient:
         return ActionShareClient.from_settings(current_settings())
@@ -220,9 +225,9 @@ def create_app(
     def index():
         if is_desktop_mode() and not is_setup_complete(current_settings()):
             return redirect(url_for("app_setup"))
-        companies = load_companies()
-        connection_error = None
-        if not companies:
+        companies, companies_error = load_companies()
+        connection_error = companies_error
+        if not companies and not connection_error:
             connection_error = "Business Central no devolvió empresas"
         return render_template(
             "index.html",
@@ -336,8 +341,9 @@ def create_app(
         ) as exc:
             error = str(exc)
 
+        companies, _ = load_companies(form.get("company", ""))
         return {
-            "companies": load_companies(form.get("company", "")),
+            "companies": companies,
             "document_types": registry.all(),
             "default_company": current_settings().company,
             "connection_error": None,
@@ -468,12 +474,13 @@ def create_app(
         ) as exc:
             error = str(exc)
 
+        companies, companies_error = load_companies(company)
         return render_template(
             "index.html",
-            companies=load_companies(company),
+            companies=companies,
             document_types=registry.all(),
             default_company=current_settings().company,
-            connection_error=None,
+            connection_error=companies_error,
             form=form,
             document=asdict(document) if document else None,
             preview=None,

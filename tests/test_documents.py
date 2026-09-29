@@ -1,4 +1,9 @@
-from agentebc.documents import DocumentNotFoundError, DocumentReader
+from agentebc.documents import (
+    DocumentNotFoundError,
+    DocumentReader,
+    bc_urlencode,
+    resolve_company_for_web_url,
+)
 
 
 class FakeClient:
@@ -9,6 +14,36 @@ class FakeClient:
     def get(self, endpoint: str):
         self.endpoints.append(endpoint)
         return self.responses.pop(0)
+
+
+def test_bc_urlencode_uses_percent20_for_spaces_in_company() -> None:
+    query = bc_urlencode({"company": "Malla Publicidad", "page": "43"})
+    assert "company=Malla%20Publicidad" in query
+    assert "Malla+Publicidad" not in query
+
+
+def test_resolve_company_for_web_url_uses_name_by_default() -> None:
+    guid = "8b0b4735-fd14-4c9d-9d61-f5882dc3aead"
+    client = FakeClient([{"value": [{"Id": guid, "Name": "Malla Publicidad"}]}])
+    assert resolve_company_for_web_url(client, "Malla Publicidad") == "Malla Publicidad"
+    assert client.endpoints == []
+
+
+def test_resolve_company_for_web_url_uses_guid_when_enabled() -> None:
+    guid = "8b0b4735-fd14-4c9d-9d61-f5882dc3aead"
+    client = FakeClient([{"value": [{"Id": guid, "Name": "Malla Publicidad"}]}])
+    assert (
+        resolve_company_for_web_url(client, "Malla Publicidad", use_guid=True)
+        == guid
+    )
+    assert "Malla+Publicidad" not in client.endpoints[0]
+
+
+def test_resolve_company_for_web_url_keeps_guid() -> None:
+    guid = "8b0b4735-fd14-4c9d-9d61-f5882dc3aead"
+    client = FakeClient([])
+    assert resolve_company_for_web_url(client, guid) == guid
+    assert client.endpoints == []
 
 
 def test_lists_companies() -> None:
@@ -45,7 +80,7 @@ def test_finds_sales_invoice_and_encodes_query() -> None:
     assert document.number == "P4941"
     assert document.kind == "sales"
     assert client.endpoints[0].startswith("salesDocuments?")
-    assert "company=PISCIS+DOS+TRES+HACHE%2C+S.L." in client.endpoints[0]
+    assert "company=PISCIS%20DOS%20TRES%20HACHE%2C%20S.L." in client.endpoints[0]
 
 
 def test_raises_when_invoice_does_not_exist() -> None:

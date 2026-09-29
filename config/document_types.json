@@ -53,9 +53,21 @@
         "dialog_steps": [
           {
             "markers": [
-              "¿Confirma que desea registrar la factura"
+              "¿Confirma que desea registrar la factura",
+              "Confirma que desea registrar",
+              "¿Desea registrar la factura",
+              "desea registrar la factura"
             ],
             "button": "Sí",
+            "selection": null,
+            "optional": true
+          },
+          {
+            "markers": [
+              "¿Quiere abrir la factura registrada",
+              "se movió a la ventana de facturas de venta registradas"
+            ],
+            "button": "No",
             "selection": null
           }
         ],
@@ -94,6 +106,20 @@
           "Mensajes de error",
           "Vista previa de registro"
         ],
+        "parse_error_rows": true,
+        "auto_confirm": false,
+        "confirmation_markers": [],
+        "confirmation_button": "Sí",
+        "dialog_steps": [],
+        "field_edits": []
+      },
+      {
+        "id": "registrar_factura_compra",
+        "label": "Registrar",
+        "safety": "interactive",
+        "menu_aria_label": null,
+        "action_aria_label": "Registrar",
+        "result_markers": [],
         "parse_error_rows": true,
         "auto_confirm": false,
         "confirmation_markers": [],

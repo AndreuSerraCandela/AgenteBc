@@ -54,3 +54,34 @@ def test_loads_project_and_referenced_sql_env(
     assert "ApplicationIntent=ReadOnly" in settings.sql_connection_string
     assert settings.safe_summary()["sql_configured"] is True
     assert "secret" not in str(settings.safe_summary())
+
+
+def test_web_base_url_overrides_odata_derivation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "AGENTEBC_ODATA_BASE_URL=http://localhost:7048/BC270/ODataV4",
+                "AGENTEBC_WEB_BASE_URL=http://localhost:8080/BC270",
+                "AGENTEBC_AUTH_MODE=windows",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for name in (
+        "AGENTEBC_ODATA_BASE_URL",
+        "AGENTEBC_WEB_BASE_URL",
+        "AGENTEBC_AUTH_MODE",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENTEBC_ENV_FILE", str(tmp_path / ".env"))
+
+    settings = Settings.from_environment()
+
+    assert settings.resolve_web_client_base_url() == "http://localhost:8080/BC270"
+    assert settings.safe_summary()["web_client_base_url"] == (
+        "http://localhost:8080/BC270"
+    )

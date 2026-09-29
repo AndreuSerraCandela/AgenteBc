@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import re
 import time
 import unicodedata
@@ -7,11 +8,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
+
+from .bc_client import BusinessCentralReadClient
+from .documents import bc_urlencode, resolve_company_for_web_url
+
+logger = logging.getLogger(__name__)
 
 from playwright.sync_api import Frame, Locator, Page, TimeoutError, sync_playwright
 
-from .browser import launch_browser
+from .browser import launch_browser, launch_persistent_context
 from .call_stack import extract_call_stack_text
 from .config import Settings
 from .document_types import (
@@ -25,6 +31,10 @@ from .documents import DocumentReference
 
 class PreviewError(RuntimeError):
     pass
+
+
+class PreviewActionStalledError(PreviewError):
+    """Registro sin éxito ni error claro de BC; conviene reintentar la misma ficha."""
 
 
 ASK_DIALOG_TIMEOUT_SECONDS = 300.0
@@ -101,16 +111,30 @@ class BusinessCentralWebPreview:
         reports_dir: Path | None = None,
         on_prompt: Callable[..., None] | None = None,
     ) -> None:
-        if not settings.odata_base_url:
-            raise ValueError("Falta AGENTEBC_ODATA_BASE_URL")
-        if not settings.username or not settings.password:
-            raise ValueError("Faltan las credenciales web de Business Central")
+        web_base = settings.resolve_web_client_base_url()
+        if not web_base:
+            raise ValueError(
+                "Falta AGENTEBC_WEB_BASE_URL o AGENTEBC_ODATA_BASE_URL"
+            )
+        self._interactive_login = settings.web_use_windows_session or (
+            settings.auth_mode == "windows"
+            and not (settings.username and settings.password)
+        )
+        if not self._interactive_login and (
+            not settings.username or not settings.password
+        ):
+            raise ValueError(
+                "Faltan credenciales web (usuario/contraseña) o active "
+                "AGENTEBC_WEB_USE_WINDOWS_SESSION=true con sesión Windows."
+            )
         self._settings = settings
-        self._web_base_url = settings.odata_base_url.rsplit("/ODataV4", 1)[0]
+        self._browser_profile = settings.web_browser_profile
+        self._web_base_url = web_base
         self._reports_dir = reports_dir or (
             Path(__file__).resolve().parents[2] / "reports"
         )
         self._on_prompt = on_prompt
+        self._company_web_param_cache: dict[str, str] = {}
 
     def _set_prompt(self, text: str | None, *, asking: bool = False) -> None:
         if self._on_prompt is None:
@@ -134,20 +158,37 @@ class BusinessCentralWebPreview:
             )
         self._reports_dir.mkdir(parents=True, exist_ok=True)
         url = self._document_url(document, definition)
+        logger.info("Abriendo ficha BC: %s", url)
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         screenshot = self._reports_dir / (
             f"{_safe_filename(action.id)}-{_safe_filename(document.company)}-"
             f"{_safe_filename(document.number)}-{timestamp}.png"
         )
 
+        posting_deadline: float | None = None
         with sync_playwright() as playwright:
-            browser = launch_browser(playwright, self._settings)
-            try:
+            browser = None
+            profile_dir = self._browser_profile
+            if profile_dir is None and self._interactive_login:
+                from .paths import AppPaths
+
+                profile_dir = AppPaths.resolve().user_root / "bc-web-profile"
+            if profile_dir is not None:
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                context = launch_persistent_context(
+                    playwright,
+                    self._settings,
+                    user_data_dir=str(profile_dir),
+                    viewport={"width": 1440, "height": 1000},
+                )
+            else:
+                browser = launch_browser(playwright, self._settings)
                 context = browser.new_context(
                     viewport={"width": 1440, "height": 1000}
                 )
+            try:
                 self._grant_clipboard_permissions(context)
-                page = context.new_page()
+                page = context.pages[0] if context.pages else context.new_page()
                 page.set_default_timeout(15_000)
                 stage = "navegación inicial"
                 page.goto(
@@ -160,6 +201,8 @@ class BusinessCentralWebPreview:
                 self._sign_in_if_needed(page)
                 stage = "carga de la ficha"
                 frame = self._wait_for_document_frame(page, action)
+                self._dismiss_bc_message_dialogs(page)
+                self._ensure_expected_document_visible(frame, document.number)
                 field_messages: tuple[PreviewMessage, ...] = ()
                 if action.field_edits:
                     stage = f"edición de campos de {action.label}"
@@ -167,8 +210,15 @@ class BusinessCentralWebPreview:
                         frame,
                         action.field_edits,
                     )
+                    if not field_messages:
+                        stage = f"guardar cambios de {action.label}"
+                        self._commit_page_edits(page, frame)
                 if action.menu_aria_label or action.action_aria_label:
                     stage = f"ejecución de {action.label}"
+                    posting_deadline = (
+                        time.monotonic()
+                        + self._settings.web_action_idle_timeout_seconds
+                    )
                     self._click_action(frame, action)
                 stage = f"diálogos de {action.label}"
                 dialog_progress = set[int]()
@@ -177,6 +227,7 @@ class BusinessCentralWebPreview:
                         page,
                         action,
                         dialog_progress,
+                        posting_deadline=posting_deadline,
                     )
                 stage = f"resultado de {action.label}"
                 if field_messages:
@@ -190,37 +241,128 @@ class BusinessCentralWebPreview:
                         frame,
                         action,
                         dialog_progress,
+                        posting_deadline=posting_deadline,
                     )
                 else:
                     wait_result = WaitResult(outcome="completed")
                 stage = "lectura del resultado"
-                rows = (
-                    self._collect_error_rows(page)
-                    if action.parse_error_rows
-                    else self._collect_rows(page)
-                )
+                if action.parse_error_rows:
+                    if self._posting_error_visible(page) or wait_result.outcome == "errors":
+                        rows = self._collect_error_rows(page)
+                    elif wait_result.outcome == "completed":
+                        rows = ()
+                    else:
+                        rows = self._collect_error_rows(page)
+                else:
+                    rows = self._collect_rows(page)
                 row_messages = (
                     tuple(_parse_error_rows(rows))
                     if action.parse_error_rows
                     else ()
                 )
                 page.screenshot(path=str(screenshot), full_page=False)
-                self._dismiss_bc_message_dialogs(page)
                 title = page.title()
+                if (
+                    wait_result.outcome == "completed"
+                    and action.parse_error_rows
+                    and self._posting_error_visible(page)
+                    and not row_messages
+                ):
+                    rows = self._collect_error_rows(page)
+                    row_messages = tuple(_parse_error_rows(rows))
+                if (
+                    wait_result.outcome == "completed"
+                    and action.id == "registrar_factura"
+                    and action.dialog_steps
+                    and not self._posting_success_visible(page)
+                    and not self._posting_error_visible(page)
+                ):
+                    raise PreviewActionStalledError(
+                        "No apareció el cuadro de confirmación de factura registrada."
+                    )
+                self._dismiss_bc_message_dialogs(page)
                 messages = wait_result.messages + row_messages
+                if messages:
+                    outcome = "errors"
+                elif wait_result.outcome == "pending_confirmation":
+                    raise PreviewActionStalledError(
+                        "La acción quedó sin terminar (confirmación pendiente en BC)."
+                    )
+                else:
+                    outcome = wait_result.outcome
                 return PreviewResult(
-                    outcome="errors" if messages else wait_result.outcome,
+                    outcome=outcome,
                     title=title,
                     messages=messages,
                     raw_rows=rows,
                     screenshot_path=screenshot,
                 )
             except TimeoutError as exc:
+                if posting_deadline is not None and any(
+                    token in stage
+                    for token in (
+                        "ejecución de",
+                        "diálogos de",
+                        "resultado de",
+                    )
+                ):
+                    raise PreviewActionStalledError(
+                        f"Tiempo agotado en Business Central ({stage})."
+                    ) from exc
                 raise PreviewError(
                     f"Business Central agotó el tiempo durante: {stage}"
                 ) from exc
+            except PreviewError:
+                try:
+                    if "page" in locals():
+                        self._dismiss_bc_message_dialogs(page)
+                except Exception:
+                    pass
+                raise
             finally:
-                browser.close()
+                context.close()
+                if browser is not None:
+                    browser.close()
+
+    def _remaining_posting_seconds(
+        self,
+        posting_deadline: float | None,
+    ) -> float | None:
+        if posting_deadline is None:
+            return None
+        return max(0.0, posting_deadline - time.monotonic())
+
+    def _enforce_posting_deadline(
+        self,
+        posting_deadline: float | None,
+        stage: str,
+        *,
+        page: Page | None = None,
+        action: ActionDefinition | None = None,
+        dialog_progress: set[int] | None = None,
+    ) -> None:
+        if page is not None and action is not None and self._posting_success_visible(
+            page
+        ):
+            if dialog_progress is not None:
+                self._complete_dialog_progress_for_success(action, dialog_progress)
+            return
+        remaining = self._remaining_posting_seconds(posting_deadline)
+        if remaining is not None and remaining <= 0:
+            limit = int(self._settings.web_action_idle_timeout_seconds)
+            raise PreviewActionStalledError(
+                f"Business Central no respondió en {limit} s ({stage})."
+            )
+
+    def _cap_wait_seconds(
+        self,
+        wait_seconds: float,
+        posting_deadline: float | None,
+    ) -> float:
+        remaining = self._remaining_posting_seconds(posting_deadline)
+        if remaining is None:
+            return wait_seconds
+        return min(wait_seconds, remaining)
 
     def _document_url(
         self,
@@ -235,19 +377,41 @@ class BusinessCentralWebPreview:
             f"'{definition.source_table}'.'{field}' IS '{value.replace(chr(39), chr(39) * 2)}'"
             for field, value in definition.page_filters.items()
         )
-        query = urlencode(
+        company_param = self._resolve_company_web_param(document.company)
+        query = bc_urlencode(
             {
-                "company": document.company,
+                "company": company_param,
                 "page": str(definition.page_id),
                 "filter": " AND ".join(filters),
             }
         )
         return f"{self._web_base_url}/?{query}"
 
+    def _resolve_company_web_param(self, company_name: str) -> str:
+        key = company_name.strip()
+        if not key:
+            return company_name
+        cached = self._company_web_param_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            resolved = resolve_company_for_web_url(
+                BusinessCentralReadClient(self._settings),
+                key,
+                use_guid=self._settings.web_company_use_guid,
+            )
+        except Exception:
+            resolved = key
+        self._company_web_param_cache[key] = resolved
+        return resolved
+
     def _sign_in_if_needed(self, page: Page) -> None:
         if "/SignIn" not in page.url and not page.locator(
             'input[type="password"]'
         ).count():
+            return
+        if self._interactive_login:
+            self._wait_for_interactive_sign_in(page)
             return
         username = page.locator('input[type="text"]').first
         password = page.locator('input[type="password"]').first
@@ -255,6 +419,46 @@ class BusinessCentralWebPreview:
         username.fill(self._settings.username or "")
         password.fill(self._settings.password or "")
         submit.evaluate("(element) => element.click()")
+
+    def _wait_for_interactive_sign_in(self, page: Page) -> None:
+        timeout = max(
+            120.0,
+            self._settings.deepseek_web_login_timeout_seconds,
+        )
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if "/SignIn" not in page.url and not page.locator(
+                'input[type="password"]'
+            ).count():
+                return
+            page.wait_for_timeout(500)
+        raise PreviewError(
+            "Complete el inicio de sesión de Business Central en la ventana "
+            "del navegador (usuario Windows / Entra ID). "
+            "La sesión se guarda en el perfil local para los siguientes lotes."
+        )
+
+    def _ensure_expected_document_visible(self, frame: Frame, number: str) -> None:
+        expected = number.strip()
+        if not expected:
+            raise PreviewError("Número de documento vacío al abrir la ficha BC.")
+        deadline = time.monotonic() + min(self._settings.request_timeout_seconds, 25.0)
+        last_body = ""
+        while time.monotonic() < deadline:
+            last_body = self._read_frame_body(frame)
+            if expected in last_body or _document_number_on_card(frame, expected):
+                return
+            lowered = last_body.casefold()
+            if "no se ha encontrado" in lowered or "not found" in lowered:
+                break
+            self._dismiss_bc_message_dialogs(frame.page)
+            frame.page.wait_for_timeout(500)
+        raise PreviewError(
+            f"La ficha BC no muestra la factura {expected}. "
+            "Compruebe en OData si sigue abierta; a veces el filtro web no "
+            "encuentra el documento (ficha en blanco)."
+            + (f" Texto visible: {last_body[:200]}…" if last_body else "")
+        )
 
     def _wait_for_document_frame(
         self,
@@ -313,6 +517,25 @@ class BusinessCentralWebPreview:
             page.wait_for_timeout(500)
         raise PreviewError(f"No se encontró la ficha para {action.label}")
 
+    def _commit_page_edits(self, page: Page, frame: Frame) -> None:
+        self._dismiss_bc_message_dialogs(page)
+        if _click_save_on_page(page, frame):
+            page.wait_for_timeout(1200)
+            self._dismiss_bc_message_dialogs(page)
+            _wait_until_not_in_edit_mode(page, frame, timeout_seconds=20.0)
+            return
+        for shortcut in ("Control+s",):
+            try:
+                page.keyboard.press(shortcut)
+                page.wait_for_timeout(900)
+                self._dismiss_bc_message_dialogs(page)
+            except Exception:
+                continue
+        if _click_save_on_page(page, frame):
+            page.wait_for_timeout(1200)
+            self._dismiss_bc_message_dialogs(page)
+            _wait_until_not_in_edit_mode(page, frame, timeout_seconds=20.0)
+
     def _apply_field_edits(
         self,
         frame: Frame,
@@ -320,11 +543,14 @@ class BusinessCentralWebPreview:
     ) -> tuple[PreviewMessage, ...]:
         self._dismiss_bc_message_dialogs(frame.page)
         self._expand_collapsed_page_fields(frame)
-        self._ensure_page_editable(frame.page, frame)
+        field_labels = tuple(step.field_label for step in field_edits)
+        self._ensure_page_editable(frame.page, frame, field_labels)
         for step in field_edits:
             self._apply_field_edit(frame, step)
             frame.page.wait_for_timeout(600)
+            self._dismiss_bc_message_dialogs(frame.page)
         self._close_open_field_dropdowns(frame)
+        self._dismiss_bc_message_dialogs(frame.page)
         return tuple(self._collect_page_validation_errors(frame))
 
     def _expand_collapsed_page_fields(self, frame: Frame) -> None:
@@ -333,6 +559,8 @@ class BusinessCentralWebPreview:
             'button[aria-label*="Mostrar más" i]',
             'button[title*="Show more" i]',
             'button[aria-label*="Show more" i]',
+            'button:has-text("Mostrar más")',
+            'button:has-text("Show more")',
         ):
             try:
                 buttons = frame.locator(selector)
@@ -345,29 +573,63 @@ class BusinessCentralWebPreview:
             except Exception:
                 continue
 
-    def _ensure_page_editable(self, page: Page, frame: Frame) -> None:
-        if _page_is_editable(frame):
+    def _ensure_page_editable(
+        self,
+        page: Page,
+        frame: Frame,
+        field_labels: tuple[str, ...] = (),
+    ) -> None:
+        if _page_is_in_edit_mode(frame):
             return
-        if _activate_edit_mode(page, frame):
-            page.wait_for_timeout(700)
-        if _page_is_editable(frame):
+        deadline = time.monotonic() + 25.0
+        pencil_used = False
+        while time.monotonic() < deadline:
+            if _page_is_in_edit_mode(frame):
+                return
+            if _activate_edit_mode(page, frame):
+                pencil_used = True
+                frame.page.wait_for_timeout(1200)
+                if _page_is_in_edit_mode(frame):
+                    return
+                if _any_field_writable(frame, field_labels):
+                    return
+                continue
+            frame.page.wait_for_timeout(400)
+        if pencil_used and _any_field_writable(frame, field_labels):
             return
         raise PreviewError(
-            "La ficha está en modo consulta y no se pudo activar la edición. "
-            "Revise permisos o el botón Editar en la captura."
+            "La ficha está en modo consulta y no se pudo pulsar Editar. "
+            "En BC hay que editar la factura antes de cambiar la fecha de registro."
         )
 
     def _apply_field_edit(self, frame: Frame, step: FieldEditStep) -> None:
-        locator = _bc_field_locator(frame, step.field_label)
-        if locator is None:
-            raise PreviewError(
-                f"No se encontró el campo {step.field_label} en la ficha"
+        last_error = step.field_label
+        for label in _field_label_aliases(step.field_label):
+            locator = _bc_field_locator(frame, label)
+            if locator is None:
+                last_error = label
+                continue
+            if _set_bc_field_value(frame, locator, step.value, field_label=label):
+                self._dismiss_bc_message_dialogs(frame.page)
+                frame.page.wait_for_timeout(500)
+                shown = _read_field_display_value(frame, label)
+                if _field_value_matches(shown, step.value):
+                    return
+                last_error = (
+                    f"{label} (visible={shown!r}, esperado={step.value})"
+                )
+                continue
+            last_error = label
+        raise PreviewError(
+            f"No se pudo asignar el valor {step.value} al campo "
+            f"{step.field_label} (probado: {', '.join(_field_label_aliases(step.field_label))}). "
+            "Compruebe que la ficha está editable."
+            + (
+                f" Último valor visible en ficha: {last_error}."
+                if "visible=" in str(last_error)
+                else ""
             )
-        if not _set_bc_field_value(frame, locator, step.value):
-            raise PreviewError(
-                f"No se pudo asignar el valor {step.value} al campo "
-                f"{step.field_label}. Compruebe que la ficha está editable."
-            )
+        )
 
     def _collect_page_validation_errors(self, frame: Frame) -> list[PreviewMessage]:
         messages: list[PreviewMessage] = []
@@ -702,17 +964,41 @@ class BusinessCentralWebPreview:
         completed: set[int],
         *,
         timeout_seconds: float | None = None,
+        posting_deadline: float | None = None,
     ) -> bool:
         ask_steps = sum(1 for step in action.dialog_steps if step.is_ask)
+        default_wait = 15.0 + ask_steps * ASK_DIALOG_TIMEOUT_SECONDS
+        if len(action.dialog_steps) > 1:
+            default_wait = max(default_wait, 45.0)
         wait_seconds = (
-            timeout_seconds
-            if timeout_seconds is not None
-            else 15.0 + ask_steps * ASK_DIALOG_TIMEOUT_SECONDS
+            timeout_seconds if timeout_seconds is not None else default_wait
         )
+        wait_seconds = self._cap_wait_seconds(wait_seconds, posting_deadline)
         deadline = time.monotonic() + wait_seconds
         while time.monotonic() < deadline:
+            if self._posting_success_visible(page):
+                self._try_handle_known_posting_dialog(page, action, completed)
+                self._complete_dialog_progress_for_success(action, completed)
+                return True
+            self._enforce_posting_deadline(
+                posting_deadline,
+                "diálogos de registro",
+                page=page,
+                action=action,
+                dialog_progress=completed,
+            )
+            if self._posting_error_visible(page):
+                return False
+            self._try_handle_known_posting_dialog(page, action, completed)
+            self._try_handle_page_prompts(page)
             self._announce_next_ask(action, completed)
-            if self._handle_dialogs(page, action, completed, max_clicks=2):
+            if self._handle_dialogs(
+                page,
+                action,
+                completed,
+                max_clicks=2,
+                posting_deadline=posting_deadline,
+            ):
                 if len(completed) >= len(action.dialog_steps):
                     return True
             elif len(completed) >= len(action.dialog_steps):
@@ -739,10 +1025,23 @@ class BusinessCentralWebPreview:
         completed: set[int],
         *,
         max_clicks: int = 8,
+        posting_deadline: float | None = None,
     ) -> int:
         clicks = 0
         for _ in range(max_clicks):
-            if not self._advance_dialog(page, action, completed):
+            self._enforce_posting_deadline(
+                posting_deadline,
+                "diálogos de registro",
+                page=page,
+                action=action,
+                dialog_progress=completed,
+            )
+            if not self._advance_dialog(
+                page,
+                action,
+                completed,
+                posting_deadline=posting_deadline,
+            ):
                 break
             clicks += 1
             page.wait_for_timeout(500)
@@ -753,6 +1052,8 @@ class BusinessCentralWebPreview:
         page: Page,
         action: ActionDefinition,
         completed: set[int],
+        *,
+        posting_deadline: float | None = None,
     ) -> bool:
         for index, step in enumerate(action.dialog_steps):
             if index in completed:
@@ -761,10 +1062,17 @@ class BusinessCentralWebPreview:
                 self._set_prompt(step.ask_prompt(), asking=True)
             frame = self._find_dialog_frame(page, step)
             if frame is None:
+                if step.optional:
+                    completed.add(index)
+                    continue
                 return False
             if step.is_ask:
                 try:
-                    if not self._wait_ask_dialog_closed(page, step):
+                    if not self._wait_ask_dialog_closed(
+                        page,
+                        step,
+                        posting_deadline=posting_deadline,
+                    ):
                         raise PreviewError(
                             "Se agotó el tiempo esperando que "
                             f"{step.ask_prompt().casefold()}"
@@ -780,8 +1088,40 @@ class BusinessCentralWebPreview:
                 return False
             button.evaluate("(element) => element.click()")
             completed.add(index)
+            if index + 1 < len(action.dialog_steps):
+                self._wait_for_dialog_step(
+                    page,
+                    action.dialog_steps[index + 1],
+                    timeout_seconds=90.0,
+                    posting_deadline=posting_deadline,
+                )
             return True
         return False
+
+    def _wait_for_dialog_step(
+        self,
+        page: Page,
+        step: DialogStep,
+        *,
+        timeout_seconds: float,
+        posting_deadline: float | None = None,
+    ) -> None:
+        timeout_seconds = self._cap_wait_seconds(
+            timeout_seconds,
+            posting_deadline,
+        )
+        deadline = time.monotonic() + timeout_seconds
+        while time.monotonic() < deadline:
+            self._enforce_posting_deadline(
+                posting_deadline,
+                "espera del siguiente diálogo",
+                page=page,
+            )
+            if self._posting_error_visible(page):
+                return
+            if self._find_dialog_frame(page, step) is not None:
+                return
+            page.wait_for_timeout(400)
 
     def _wait_ask_dialog_closed(
         self,
@@ -789,9 +1129,19 @@ class BusinessCentralWebPreview:
         step: DialogStep,
         *,
         timeout_seconds: float = ASK_DIALOG_TIMEOUT_SECONDS,
+        posting_deadline: float | None = None,
     ) -> bool:
+        timeout_seconds = self._cap_wait_seconds(
+            timeout_seconds,
+            posting_deadline,
+        )
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
+            self._enforce_posting_deadline(
+                posting_deadline,
+                "diálogo manual",
+                page=page,
+            )
             if self._find_dialog_frame(page, step) is None:
                 return True
             page.wait_for_timeout(400)
@@ -842,29 +1192,23 @@ class BusinessCentralWebPreview:
 
     @staticmethod
     def _dialog_button_locator(frame: Frame, button_label: str) -> Locator | None:
+        label = button_label.strip()
+        if not label:
+            return None
+        exact = len(label) <= 4
         for selector in ('[role="dialog"]', '[role="alertdialog"]'):
             dialogs = frame.locator(f"{selector}:visible")
             for index in range(dialogs.count()):
                 dialog = dialogs.nth(index)
-                role_button = dialog.get_by_role("button", name=button_label)
-                if role_button.count() and role_button.first.is_visible():
-                    return role_button.first
-                aria_button = dialog.locator(
-                    f'button[aria-label="{_css_string(button_label)}"]'
-                )
-                if aria_button.count() and aria_button.first.is_visible():
-                    return aria_button.first
-        role_button = frame.get_by_role("button", name=button_label)
+                located = _dialog_button_in_container(dialog, label, exact=exact)
+                if located is not None:
+                    return located
+        role_button = frame.get_by_role("button", name=label, exact=exact)
         if role_button.count():
             candidate = role_button.first
             if candidate.is_visible():
                 return candidate
-        aria_button = frame.locator(
-            f'button[aria-label="{_css_string(button_label)}"]'
-        )
-        if aria_button.count() and aria_button.first.is_visible():
-            return aria_button.first
-        return None
+        return _dialog_button_in_container(frame.locator("body"), label, exact=exact)
 
     def _has_pending_dialog(
         self,
@@ -889,9 +1233,15 @@ class BusinessCentralWebPreview:
     ) -> bool:
         if not action.auto_confirm or not action.dialog_steps:
             return False
-        if len(completed) < len(action.dialog_steps):
+        if page is None:
+            return self._required_dialog_steps_pending(action, completed)
+        if self._has_pending_dialog(page, action, completed):
             return True
-        return self._has_pending_dialog(page, action, completed)
+        if not self._required_dialog_steps_pending(action, completed):
+            return False
+        if self._posting_error_visible(page):
+            return False
+        return self._orphan_confirmation_dialog_visible(page, action, completed)
 
     @staticmethod
     def _collect_rows(page: Page) -> tuple[str, ...]:
@@ -916,45 +1266,119 @@ class BusinessCentralWebPreview:
     def _collect_error_rows_from_grid(self, page: Page) -> tuple[str, ...]:
         rows: list[str] = []
         for frame in page.frames:
+            surfaces: list[Locator] = []
             try:
-                body = frame.locator("body").inner_text(timeout=1_000)
+                surfaces.append(frame.locator("body"))
             except Exception:
                 continue
-            if not _is_error_messages_page(body):
-                continue
-
-            grids = frame.locator('[role="grid"]')
-            for grid_index in range(grids.count()):
-                grid = grids.nth(grid_index)
-                try:
-                    if not grid.is_visible():
+            try:
+                dialogs = frame.locator('[role="dialog"]')
+                for index in range(dialogs.count()):
+                    dialog = dialogs.nth(index)
+                    try:
+                        if dialog.is_visible():
+                            surfaces.append(dialog)
+                    except Exception:
                         continue
+            except Exception:
+                pass
+
+            for surface in surfaces:
+                try:
+                    surface_text = surface.inner_text(timeout=1_000)
                 except Exception:
                     continue
+                if not _is_error_messages_page(surface_text):
+                    continue
 
-                headers = _read_grid_headers(grid)
-                if headers and _is_complete_error_grid_headers(headers):
-                    rows.append(_encode_error_grid_headers(headers))
-                stack_col = (
-                    _column_index_for_call_stack(headers) if headers else None
-                )
-                grid_rows = grid.locator('[role="row"]')
-                for row_index in range(grid_rows.count()):
-                    row = grid_rows.nth(row_index)
+                grids = surface.locator('[role="grid"]')
+                for grid_index in range(grids.count()):
+                    grid = grids.nth(grid_index)
                     try:
-                        if not row.is_visible():
+                        if not grid.is_visible():
                             continue
                     except Exception:
                         continue
 
-                    values = self._read_error_grid_row(frame, row, stack_col)
-                    if not values or _is_error_message_header_row(values):
-                        continue
-                    if not _is_message_type_label(values[0]):
-                        continue
-                    rows.append("\t".join(values))
+                    headers = _read_grid_headers(grid)
+                    if headers and _is_complete_error_grid_headers(headers):
+                        rows.append(_encode_error_grid_headers(headers))
+                    stack_col = (
+                        _column_index_for_call_stack(headers) if headers else None
+                    )
+                    grid_rows = grid.locator('[role="row"]')
+                    for row_index in range(grid_rows.count()):
+                        row = grid_rows.nth(row_index)
+                        try:
+                            if not row.is_visible():
+                                continue
+                        except Exception:
+                            continue
+
+                        values = self._read_error_grid_row(frame, row, stack_col)
+                        if not values or _is_error_message_header_row(values):
+                            continue
+                        if not _is_message_type_label(values[0]):
+                            continue
+                        rows.append("\t".join(values))
 
         return tuple(rows)
+
+    def _posting_success_visible(self, page: Page) -> bool:
+        """Solo el cuadro de BC tras registrar (evita falsos positivos en la ficha)."""
+        for frame in page.frames:
+            try:
+                dialogs = frame.locator('[role="dialog"], [role="alertdialog"]')
+                for index in range(dialogs.count()):
+                    dialog = dialogs.nth(index)
+                    try:
+                        if not dialog.is_visible():
+                            continue
+                    except Exception:
+                        continue
+                    text = dialog.inner_text(timeout=800)
+                    if _is_error_messages_page(text):
+                        continue
+                    if _confirmation_visible(
+                        text,
+                        _POSTING_SUCCESS_DIALOG_MARKERS,
+                    ):
+                        return True
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _complete_dialog_progress_for_success(
+        action: ActionDefinition,
+        dialog_progress: set[int],
+    ) -> None:
+        for index in range(len(action.dialog_steps)):
+            dialog_progress.add(index)
+
+    def _posting_error_visible(self, page: Page) -> bool:
+        for frame in page.frames:
+            try:
+                body = frame.locator("body").inner_text(timeout=800)
+            except Exception:
+                body = ""
+            if _is_error_messages_page(body):
+                return True
+            try:
+                dialogs = frame.locator('[role="dialog"]')
+                for index in range(dialogs.count()):
+                    dialog = dialogs.nth(index)
+                    try:
+                        if not dialog.is_visible():
+                            continue
+                    except Exception:
+                        continue
+                    text = dialog.inner_text(timeout=800)
+                    if _is_error_messages_page(text):
+                        return True
+            except Exception:
+                continue
+        return False
 
     def _read_error_grid_row(
         self,
@@ -1031,12 +1455,40 @@ class BusinessCentralWebPreview:
         frame: Frame,
         action: ActionDefinition,
         dialog_progress: set[int],
+        *,
+        posting_deadline: float | None = None,
     ) -> WaitResult:
         deadline = time.monotonic() + self._settings.request_timeout_seconds
+        if posting_deadline is not None:
+            deadline = min(deadline, posting_deadline)
         settle_after = None
         while time.monotonic() < deadline:
+            if self._posting_success_visible(page):
+                self._try_handle_known_posting_dialog(page, action, dialog_progress)
+                self._complete_dialog_progress_for_success(action, dialog_progress)
+                return WaitResult(outcome="completed")
+            self._enforce_posting_deadline(
+                posting_deadline,
+                "resultado de la acción",
+                page=page,
+                action=action,
+                dialog_progress=dialog_progress,
+            )
+            self._try_handle_known_posting_dialog(page, action, dialog_progress)
+            self._try_handle_page_prompts(page)
             if action.auto_confirm:
-                self._handle_dialogs(page, action, dialog_progress, max_clicks=1)
+                max_clicks = 4 if self._dialog_work_pending(
+                    page, action, dialog_progress
+                ) else 1
+                self._handle_dialogs(
+                    page,
+                    action,
+                    dialog_progress,
+                    max_clicks=max_clicks,
+                    posting_deadline=posting_deadline,
+                )
+            if self._posting_error_visible(page):
+                return WaitResult(outcome="errors")
             bc_message = self._peek_bc_message_dialog(
                 page,
                 action,
@@ -1051,9 +1503,18 @@ class BusinessCentralWebPreview:
                 settle_after = None
                 page.wait_for_timeout(500)
                 continue
+            if self._registration_settled(page, action, dialog_progress):
+                if settle_after is None:
+                    settle_after = time.monotonic() + 1.2
+                elif time.monotonic() >= settle_after:
+                    return WaitResult(outcome="completed")
+                page.wait_for_timeout(200)
+                continue
             if action.result_markers and any(
                 marker in combined for marker in action.result_markers
             ):
+                if self._posting_error_visible(page) or "Mensajes de error" in combined:
+                    return WaitResult(outcome="errors")
                 return WaitResult(outcome="completed")
             if action.result_markers:
                 page.wait_for_timeout(500)
@@ -1061,11 +1522,21 @@ class BusinessCentralWebPreview:
             if settle_after is None:
                 settle_after = time.monotonic() + 3
             elif time.monotonic() >= settle_after:
+                if action.id == "registrar_factura":
+                    break
                 return WaitResult(outcome="completed")
             page.wait_for_timeout(500)
+        if self._registration_settled(page, action, dialog_progress):
+            if action.id == "registrar_factura" and not self._posting_success_visible(
+                page
+            ):
+                return WaitResult(outcome="pending_confirmation")
+            return WaitResult(outcome="completed")
         if self._has_pending_dialog(page, action, dialog_progress):
             return WaitResult(outcome="pending_confirmation")
-        if action.auto_confirm and len(dialog_progress) < len(action.dialog_steps):
+        if action.auto_confirm and self._required_dialog_steps_pending(
+            action, dialog_progress
+        ):
             return WaitResult(outcome="pending_confirmation")
         bc_message = self._peek_bc_message_dialog(
             page,
@@ -1075,8 +1546,198 @@ class BusinessCentralWebPreview:
         if bc_message is not None:
             return WaitResult(outcome="errors", messages=(bc_message,))
         if action.result_markers:
-            raise PreviewError("No se pudo determinar el resultado de la acción")
+            raise PreviewActionStalledError(
+                "No se pudo determinar si el registro terminó correctamente."
+            )
         return WaitResult(outcome="completed")
+
+    @staticmethod
+    def _required_dialog_steps_pending(
+        action: ActionDefinition,
+        dialog_progress: set[int],
+    ) -> bool:
+        for index, step in enumerate(action.dialog_steps):
+            if step.optional:
+                continue
+            if index not in dialog_progress:
+                return True
+        return False
+
+    @staticmethod
+    def _all_dialog_steps_handled(
+        action: ActionDefinition,
+        dialog_progress: set[int],
+    ) -> bool:
+        if not action.dialog_steps:
+            return False
+        for index, step in enumerate(action.dialog_steps):
+            if step.optional:
+                continue
+            if index not in dialog_progress:
+                return False
+        return True
+
+    def _registration_settled(
+        self,
+        page: Page,
+        action: ActionDefinition,
+        dialog_progress: set[int],
+    ) -> bool:
+        if self._posting_error_visible(page):
+            return False
+        if self._posting_success_visible(page):
+            self._complete_dialog_progress_for_success(action, dialog_progress)
+            return True
+        if self._has_pending_dialog(page, action, dialog_progress):
+            return False
+        if self._orphan_confirmation_dialog_visible(page, action, dialog_progress):
+            return False
+        if not action.dialog_steps:
+            return True
+        if self._all_dialog_steps_handled(action, dialog_progress):
+            return True
+        return False
+
+    def _orphan_confirmation_dialog_visible(
+        self,
+        page: Page,
+        action: ActionDefinition,
+        dialog_progress: set[int],
+    ) -> bool:
+        for frame in page.frames:
+            try:
+                dialogs = frame.locator('[role="dialog"], [role="alertdialog"]')
+                for index in range(dialogs.count()):
+                    dialog = dialogs.nth(index)
+                    try:
+                        if not dialog.is_visible():
+                            continue
+                    except Exception:
+                        continue
+                    text = dialog.inner_text(timeout=800)
+                    if _is_error_messages_page(text):
+                        continue
+                    if _confirmation_visible(
+                        text,
+                        _POSTING_SUCCESS_DIALOG_MARKERS,
+                        loose=True,
+                    ):
+                        continue
+                    if self._matches_pending_dialog_step(
+                        text,
+                        action,
+                        dialog_progress,
+                    ):
+                        continue
+                    if _looks_like_confirmation_dialog(text):
+                        return True
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _has_any_visible_dialog(page: Page) -> bool:
+        for frame in page.frames:
+            try:
+                dialogs = frame.locator('[role="dialog"], [role="alertdialog"]')
+                for index in range(dialogs.count()):
+                    dialog = dialogs.nth(index)
+                    try:
+                        if dialog.is_visible():
+                            return True
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        return False
+
+    def _try_handle_known_posting_dialog(
+        self,
+        page: Page,
+        action: ActionDefinition | None = None,
+        dialog_progress: set[int] | None = None,
+    ) -> bool:
+        for frame in page.frames:
+            try:
+                dialogs = frame.locator('[role="dialog"], [role="alertdialog"]')
+                for index in range(dialogs.count()):
+                    dialog = dialogs.nth(index)
+                    try:
+                        if not dialog.is_visible():
+                            continue
+                    except Exception:
+                        continue
+                    text = dialog.inner_text(timeout=800)
+                    if _is_error_messages_page(text):
+                        continue
+                    for rule in _KNOWN_POSTING_DIALOG_RULES:
+                        if not _confirmation_visible(text, rule.markers):
+                            continue
+                        exact = len(rule.button.strip()) <= 4
+                        button = _dialog_button_in_container(
+                            dialog,
+                            rule.button,
+                            exact=exact,
+                        )
+                        if button is None:
+                            continue
+                        button.evaluate("(element) => element.click()")
+                        if action is not None and dialog_progress is not None:
+                            self._mark_matching_dialog_steps(
+                                action,
+                                dialog_progress,
+                                text,
+                            )
+                        page.wait_for_timeout(350)
+                        return True
+            except Exception:
+                continue
+        return False
+
+    @staticmethod
+    def _mark_matching_dialog_steps(
+        action: ActionDefinition,
+        dialog_progress: set[int],
+        dialog_text: str,
+    ) -> None:
+        for index, step in enumerate(action.dialog_steps):
+            if index in dialog_progress:
+                continue
+            if _confirmation_visible(dialog_text, step.markers, loose=True):
+                dialog_progress.add(index)
+
+    def _try_handle_page_prompts(self, page: Page) -> bool:
+        for frame in page.frames:
+            try:
+                body_text = frame.locator("body").inner_text(timeout=800)
+            except Exception:
+                continue
+            folded = _fold_dialog_text(body_text)
+            for markers, button_label in _KNOWN_PAGE_PROMPT_RULES:
+                if not _confirmation_visible(body_text, markers):
+                    continue
+                button = self._dialog_button_locator(frame, button_label)
+                if button is not None:
+                    button.evaluate("(element) => element.click()")
+                    page.wait_for_timeout(350)
+                    return True
+                scoped = frame.locator("body").get_by_role(
+                    "button",
+                    name=button_label,
+                    exact=len(button_label) <= 4,
+                )
+                if scoped.count() and scoped.first.is_visible():
+                    scoped.first.evaluate("(element) => element.click()")
+                    page.wait_for_timeout(350)
+                    return True
+            if "transmis" in folded and "sii" in folded:
+                for label in ("No", "No volver a preguntar"):
+                    control = frame.locator("body").get_by_text(label, exact=True)
+                    if control.count() and control.first.is_visible():
+                        control.first.evaluate("(element) => element.click()")
+                        page.wait_for_timeout(350)
+                        return True
+        return False
 
     def _peek_bc_message_dialog(
         self,
@@ -1085,7 +1746,8 @@ class BusinessCentralWebPreview:
         dialog_progress: set[int],
     ) -> PreviewMessage | None:
         if action.auto_confirm and len(dialog_progress) < len(action.dialog_steps):
-            return None
+            if not self._posting_error_visible(page):
+                return None
         for frame in page.frames:
             try:
                 dialogs = frame.locator('[role="dialog"]')
@@ -1259,19 +1921,80 @@ class BusinessCentralWebPreview:
         return None
 
     def _dismiss_bc_message_dialogs(self, page: Page) -> None:
+        for _ in range(8):
+            if self._dismiss_posting_date_change_notice(page):
+                page.wait_for_timeout(250)
+                continue
+            if self._posting_error_visible(page):
+                if not self._dismiss_error_messages_surface(page):
+                    break
+            elif not self._dismiss_simple_bc_dialog(page):
+                break
+            page.wait_for_timeout(250)
+
+    def _dismiss_posting_date_change_notice(self, page: Page) -> bool:
+        for frame in page.frames:
+            if _accept_bc_notice_dialog(frame, _POSTING_DATE_CHANGE_NOTICE_MARKERS):
+                return True
+        return False
+
+    def _dismiss_simple_bc_dialog(self, page: Page) -> bool:
         for frame in page.frames:
             try:
-                dialogs = frame.locator('[role="dialog"]:visible')
+                dialogs = frame.locator(
+                    '[role="dialog"]:visible, [role="alertdialog"]:visible'
+                )
                 if not dialogs.count():
                     continue
                 for button_label in ("Aceptar", "OK"):
                     button = self._dialog_button_locator(frame, button_label)
                     if button is not None:
                         button.evaluate("(element) => element.click()")
-                        page.wait_for_timeout(200)
-                        break
+                        return True
             except Exception:
                 continue
+        return False
+
+    def _dismiss_error_messages_surface(self, page: Page) -> bool:
+        for frame in page.frames:
+            scopes: list[Locator] = []
+            try:
+                scopes.append(frame.locator("body"))
+            except Exception:
+                pass
+            try:
+                for dialog in frame.locator('[role="dialog"]:visible').all():
+                    scopes.append(dialog)
+            except Exception:
+                pass
+            for scope in scopes:
+                for button_label in ("Cerrar", "Close", "OK", "Aceptar"):
+                    located = _dialog_button_in_container(
+                        scope,
+                        button_label,
+                        exact=button_label in {"OK", "No", "Sí"},
+                    )
+                    if located is not None:
+                        try:
+                            located.evaluate("(element) => element.click()")
+                            return True
+                        except Exception:
+                            continue
+                try:
+                    close_control = scope.locator(
+                        'button[title*="Cerrar" i], button[aria-label*="Cerrar" i], '
+                        'button[title*="Close" i], button[aria-label*="Close" i]'
+                    )
+                    if close_control.count() and close_control.first.is_visible():
+                        close_control.first.evaluate("(element) => element.click()")
+                        return True
+                except Exception:
+                    continue
+        try:
+            page.keyboard.press("Escape")
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def _matches_pending_dialog_step(
@@ -1828,15 +2551,12 @@ _EDIT_BUTTON_LABELS = (
 _EDIT_MODE_MARKERS = (
     "Guardar",
     "Save",
+)
+_EDIT_DISCARD_MARKERS = (
     "Descartar",
     "Discard",
     "Descartar cambios",
     "Discard changes",
-)
-_EDIT_MODE_ACTIVE_PATTERNS = (
-    "solo lectura",
-    "read-only",
-    "readonly",
 )
 _EDIT_ACTIVATE_PATTERNS = (
     "Realizar cambios",
@@ -1848,58 +2568,189 @@ _EDIT_ACTIVATE_PATTERNS = (
 _EDIT_SHORTCUTS = ("Control+e", "Alt+e")
 
 
-def _page_is_editable(frame: Frame) -> bool:
-    for pattern in _EDIT_MODE_ACTIVE_PATTERNS:
-        locator = frame.locator(f'button[title*="{_css_string(pattern)}" i]')
+def _document_number_on_card(frame: Frame, number: str) -> bool:
+    expected = number.strip()
+    if not expected:
+        return False
+    probes: list[Locator] = []
+    for control in ("No.", "No"):
+        probes.append(frame.locator(f'[controlname="{_css_string(control)}"]'))
+    probes.extend(
+        [
+            frame.get_by_label("N.º", exact=False),
+            frame.get_by_label("No.", exact=False),
+            frame.locator('[aria-label*="N.º" i]'),
+            frame.locator('[aria-label*="No." i]'),
+        ]
+    )
+    for probe in probes:
         try:
-            if locator.count() and locator.first.is_visible():
-                return True
-        except Exception:
-            continue
-    for label in _EDIT_MODE_MARKERS:
-        button = frame.get_by_role("button", name=label)
-        try:
-            if button.count() and button.first.is_visible():
-                return True
+            if not probe.count():
+                continue
+            container = probe.first
+            for loc in (
+                container.locator('input, [role="textbox"], [role="combobox"]'),
+                container,
+            ):
+                try:
+                    if not loc.count():
+                        continue
+                    target = loc.first
+                    try:
+                        value = target.input_value(timeout=400)
+                        if expected in value:
+                            return True
+                    except Exception:
+                        pass
+                    text = target.inner_text(timeout=400).strip()
+                    if expected in text:
+                        return True
+                except Exception:
+                    continue
         except Exception:
             continue
     return False
 
 
-def _activate_edit_mode(page: Page, frame: Frame) -> bool:
+def _click_save_on_page(page: Page, frame: Frame) -> bool:
     for scope in (frame, page):
+        for label in ("Guardar", "Save"):
+            for locator in (
+                scope.get_by_role("button", name=label),
+                scope.locator(f'button[title*="{_css_string(label)}" i]'),
+                scope.locator(f'button[aria-label*="{_css_string(label)}" i]'),
+            ):
+                try:
+                    if locator.count() and locator.first.is_visible():
+                        locator.first.click(force=True)
+                        return True
+                except Exception:
+                    continue
+    return False
+
+
+def _any_field_writable(frame: Frame, field_labels: tuple[str, ...]) -> bool:
+    for label in field_labels:
+        for alias in _field_label_aliases(label):
+            locator = _bc_field_locator(frame, alias)
+            if locator is not None and _bc_field_is_writable(locator):
+                return True
+    return False
+
+
+def _page_is_in_edit_mode(frame: Frame) -> bool:
+    """True si la ficha está en edición (aparece Guardar / Save en la barra)."""
+    for label in _EDIT_MODE_MARKERS:
+        for locator in (
+            frame.get_by_role("button", name=label),
+            frame.locator(f'button[title*="{_css_string(label)}" i]'),
+            frame.locator(f'button[aria-label*="{_css_string(label)}" i]'),
+        ):
+            try:
+                if locator.count() and locator.first.is_visible():
+                    return True
+            except Exception:
+                continue
+    return False
+
+
+def _page_is_editable(frame: Frame) -> bool:
+    return _page_is_in_edit_mode(frame)
+
+
+def _wait_until_not_in_edit_mode(
+    page: Page,
+    frame: Frame,
+    *,
+    timeout_seconds: float,
+) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if not _page_is_in_edit_mode(frame):
+            return
+        page.wait_for_timeout(300)
+
+
+def _activate_edit_mode(page: Page, frame: Frame) -> bool:
+    if _page_is_in_edit_mode(frame):
+        return True
+    for scope in (frame, page):
+        for exact_title in (
+            "Realizar cambios en la página",
+            "Make changes to this page",
+        ):
+            locator = scope.locator(
+                f'button[title="{_css_string(exact_title)}"],'
+                f'button[aria-label="{_css_string(exact_title)}"]'
+            )
+            try:
+                if locator.count() and locator.first.is_visible():
+                    locator.first.click(force=True)
+                    page.wait_for_timeout(800)
+                    if _page_is_in_edit_mode(frame):
+                        return True
+                    return True
+            except Exception:
+                pass
         for partial in _EDIT_ACTIVATE_PATTERNS:
             locator = scope.locator(
                 f'button[aria-label*="{_css_string(partial)}" i],'
                 f'button[title*="{_css_string(partial)}" i]'
             )
             try:
-                if locator.count() and locator.first.is_visible():
-                    locator.first.click()
-                    return True
+                count = min(locator.count(), 5)
+                for index in range(count):
+                    candidate = locator.nth(index)
+                    if not candidate.is_visible():
+                        continue
+                    candidate.click(force=True)
+                    page.wait_for_timeout(500)
+                    if _page_is_in_edit_mode(frame):
+                        return True
             except Exception:
                 pass
         for label in _EDIT_BUTTON_LABELS:
             for locator in (
                 scope.get_by_role("button", name=label),
+                scope.get_by_role("menuitem", name=label),
                 scope.locator(f'button[aria-label="{_css_string(label)}"]'),
                 scope.locator(f'button[title="{_css_string(label)}"]'),
             ):
                 try:
                     if not locator.count():
                         continue
-                    candidate = locator.first
-                    if not candidate.is_visible():
-                        continue
-                    candidate.click()
-                    return True
+                    count = min(locator.count(), 5)
+                    for index in range(count):
+                        candidate = locator.nth(index)
+                        if not candidate.is_visible():
+                            continue
+                        candidate.click(force=True)
+                        page.wait_for_timeout(500)
+                        if _page_is_in_edit_mode(frame):
+                            return True
                 except Exception:
                     continue
+        try:
+            manage = scope.get_by_role("button", name="Administrar")
+            if not manage.count():
+                manage = scope.get_by_role("button", name="Manage")
+            if manage.count() and manage.first.is_visible():
+                manage.first.click()
+                page.wait_for_timeout(400)
+                for label in ("Editar", "Edit", "Realizar cambios en la página"):
+                    item = scope.get_by_role("menuitem", name=label)
+                    if item.count() and item.first.is_visible():
+                        item.first.click()
+                        page.wait_for_timeout(600)
+                        if _page_is_in_edit_mode(frame):
+                            return True
+        except Exception:
+            pass
     for shortcut in _EDIT_SHORTCUTS:
         try:
             page.keyboard.press(shortcut)
-            page.wait_for_timeout(400)
-            if _page_is_editable(frame):
+            page.wait_for_timeout(500)
+            if _page_is_in_edit_mode(frame):
                 return True
         except Exception:
             continue
@@ -1940,6 +2791,8 @@ def _extract_inline_error_lines(body: str) -> tuple[str, ...]:
 
 _FIELD_CONTROL_NAMES: dict[str, tuple[str, ...]] = {
     "estado": ("Estado Contrato",),
+    "fecha registro": ("PostingDate",),
+    "posting date": ("PostingDate",),
 }
 
 
@@ -1947,6 +2800,7 @@ def _bc_field_locator(frame: Frame, label: str) -> Locator | None:
     control_names = _FIELD_CONTROL_NAMES.get(label.casefold(), ())
     candidates: list[Locator] = []
     for control_name in control_names:
+        candidates.append(frame.locator(f'[controlname="{_css_string(control_name)}"]'))
         candidates.append(
             frame.locator(f'[controlname="{_css_string(control_name)}"]')
             .locator('[role="textbox"], [role="combobox"], input, textarea')
@@ -1966,11 +2820,85 @@ def _bc_field_locator(frame: Frame, label: str) -> Locator | None:
     )
     for candidate in candidates:
         try:
-            if candidate.count() and candidate.first.is_visible():
-                return candidate.first
+            picked = _pick_writable_bc_field(candidate)
+            if picked is not None:
+                return picked
         except Exception:
             continue
     return _bc_field_locator_near_caption(frame, label)
+
+
+def _bc_field_is_writable(locator: Locator) -> bool:
+    try:
+        if not locator.is_visible():
+            return False
+    except Exception:
+        return False
+    readonly = (locator.get_attribute("aria-readonly") or "").casefold()
+    if readonly in {"true", "1"}:
+        return False
+    try:
+        tag = locator.evaluate("el => el.tagName")
+    except Exception:
+        tag = ""
+    if tag in {"INPUT", "TEXTAREA", "SELECT"}:
+        try:
+            if not locator.is_enabled():
+                return False
+        except Exception:
+            pass
+        html_ro = (locator.get_attribute("readonly") or "").casefold()
+        if html_ro not in ("", "false", "0"):
+            return False
+        return True
+    role = (locator.get_attribute("role") or "").casefold()
+    if role in {"textbox", "combobox"}:
+        return True
+    if tag == "SPAN":
+        return False
+    return role == "textbox"
+
+
+def _pick_writable_bc_field(candidate: Locator) -> Locator | None:
+    try:
+        total = candidate.count()
+    except Exception:
+        return None
+    if not total:
+        return None
+    for index in range(min(total, 8)):
+        item = candidate.nth(index)
+        try:
+            if not item.is_visible():
+                continue
+        except Exception:
+            continue
+        if _bc_field_is_writable(item):
+            return item
+        nested = item.locator(
+            'input:not([readonly]), textarea:not([readonly]), '
+            '[role="textbox"]:not([aria-readonly="true"]), '
+            '[role="combobox"]:not([aria-readonly="true"])'
+        )
+        try:
+            if nested.count() and nested.first.is_visible():
+                if _bc_field_is_writable(nested.first):
+                    return nested.first
+        except Exception:
+            pass
+        container = item.locator(
+            "xpath=ancestor::*[contains(@class,'edit') or @controlname][1]"
+        )
+        try:
+            if container.count():
+                inner = container.first.locator(
+                    'input:not([readonly]), [role="textbox"]:not([aria-readonly="true"])'
+                )
+                if inner.count() and inner.first.is_visible():
+                    return inner.first
+        except Exception:
+            pass
+    return None
 
 
 def _bc_field_locator_near_caption(frame: Frame, label: str) -> Locator | None:
@@ -1988,18 +2916,129 @@ def _bc_field_locator_near_caption(frame: Frame, label: str) -> Locator | None:
                 '[role="combobox"], [role="textbox"], input, textarea, '
                 '[contenteditable="true"]'
             )
-            if row.count() and row.first.is_visible():
-                return row.first
+            picked = _pick_writable_bc_field(row)
+            if picked is not None:
+                return picked
     except Exception:
         return None
     return None
 
 
-def _set_bc_field_value(frame: Frame, locator: Locator, value: str) -> bool:
+def _field_label_aliases(label: str) -> tuple[str, ...]:
+    folded = label.casefold().strip()
+    if folded in {"fecha registro", "posting date", "fecha de registro"}:
+        return ("Fecha registro", "Fecha de registro", "Posting Date")
+    return (label,)
+
+
+def _bc_field_value_attempts(value: str) -> tuple[str, ...]:
+    text = value.strip()
+    attempts: list[str] = [text]
+    parts = text.split("/")
+    if len(parts) == 3 and len(parts[2]) == 4:
+        attempts.append(f"{parts[0]}/{parts[1]}/{parts[2][-2:]}")
+    if len(parts) == 3 and len(parts[2]) == 2:
+        yy = int(parts[2])
+        year = 2000 + yy if yy < 100 else yy
+        attempts.append(f"{parts[0]}/{parts[1]}/{year}")
+    return tuple(dict.fromkeys(attempts))
+
+
+def _read_field_display_value(frame: Frame, label: str) -> str:
+    for control_name in _FIELD_CONTROL_NAMES.get(label.casefold(), ()):
+        container = frame.locator(f'[controlname="{_css_string(control_name)}"]')
+        try:
+            if container.count() and container.first.is_visible():
+                text = container.first.inner_text(timeout=1_000).strip()
+                if text:
+                    parsed = _extract_first_ui_date(text)
+                    if parsed:
+                        return parsed
+                    return text
+        except Exception:
+            pass
+    near = _read_field_display_value_near_caption(frame, label)
+    if near:
+        return near
+    locator = _bc_field_locator(frame, label)
+    if locator is None:
+        return ""
+    try:
+        current = locator.input_value(timeout=500)
+        if current.strip():
+            return current.strip()
+    except Exception:
+        pass
+    try:
+        text = locator.inner_text(timeout=500).strip()
+        parsed = _extract_first_ui_date(text)
+        return parsed or text
+    except Exception:
+        return ""
+
+
+def _read_field_display_value_near_caption(frame: Frame, label: str) -> str:
+    caption = frame.get_by_text(label, exact=True)
+    try:
+        if not caption.count():
+            return ""
+        for index in range(min(caption.count(), 6)):
+            marker = caption.nth(index)
+            if not marker.is_visible():
+                continue
+            row = marker.locator(
+                "xpath=ancestor::*[self::tr or self::div][1]"
+            )
+            if not row.count():
+                continue
+            text = row.first.inner_text(timeout=800).strip()
+            parsed = _extract_first_ui_date(text)
+            if parsed:
+                return parsed
+    except Exception:
+        return ""
+    return ""
+
+
+def _extract_first_ui_date(text: str) -> str:
+    parsed = _parse_ui_date_token(text)
+    if not parsed:
+        return ""
+    year, month, day = parsed
+    return f"{day:02d}/{month:02d}/{year}"
+
+
+def _set_bc_field_value(
+    frame: Frame,
+    locator: Locator,
+    value: str,
+    *,
+    field_label: str | None = None,
+) -> bool:
+    for attempt in _bc_field_value_attempts(value):
+        if _try_set_bc_field_value_once(frame, locator, attempt):
+            if field_label:
+                _accept_bc_notice_dialog(frame, _POSTING_DATE_CHANGE_NOTICE_MARKERS)
+                frame.page.wait_for_timeout(400)
+                shown = _read_field_display_value(frame, field_label)
+                if _field_value_matches(shown, attempt):
+                    return True
+            elif _field_contains_value(locator, attempt):
+                return True
+    return False
+
+
+def _try_set_bc_field_value_once(frame: Frame, locator: Locator, value: str) -> bool:
     try:
         locator.scroll_into_view_if_needed(timeout=3_000)
     except Exception:
         pass
+    if not _bc_field_is_writable(locator):
+        try:
+            frame.page.keyboard.press("F2")
+            frame.page.wait_for_timeout(350)
+        except Exception:
+            pass
     locator.click()
     frame.page.wait_for_timeout(250)
     try:
@@ -2028,9 +3067,28 @@ def _set_bc_field_value(frame: Frame, locator: Locator, value: str) -> bool:
     try:
         locator.fill(value)
     except Exception:
-        frame.page.keyboard.type(value, delay=30)
-    frame.page.keyboard.press("Tab")
-    frame.page.wait_for_timeout(300)
+        pass
+    try:
+        locator.press("Control+a", timeout=1_000)
+    except Exception:
+        try:
+            frame.page.keyboard.press("Control+A")
+        except Exception:
+            pass
+    try:
+        locator.press("Backspace", timeout=500)
+    except Exception:
+        pass
+    frame.page.keyboard.type(value, delay=45)
+    frame.page.wait_for_timeout(200)
+    for key in ("Enter", "Tab"):
+        try:
+            frame.page.keyboard.press(key)
+            frame.page.wait_for_timeout(450)
+        except Exception:
+            continue
+    _accept_bc_notice_dialog(frame, _POSTING_DATE_CHANGE_NOTICE_MARKERS)
+    frame.page.wait_for_timeout(350)
     return _field_contains_value(locator, value)
 
 
@@ -2055,17 +3113,51 @@ def _select_dropdown_value(frame: Frame, value: str) -> bool:
 def _field_contains_value(locator: Locator, value: str) -> bool:
     try:
         current = locator.input_value(timeout=500)
-        if value.casefold() in current.casefold():
+        if _field_value_matches(current, value):
             return True
     except Exception:
         pass
     try:
         text = locator.inner_text(timeout=500).strip()
-        if value.casefold() in text.casefold():
+        if _field_value_matches(text, value):
             return True
     except Exception:
         pass
+    try:
+        container = locator.locator(
+            "xpath=ancestor::*[@controlname or contains(@class,'edit')][1]"
+        )
+        if container.count():
+            combined = container.first.inner_text(timeout=500).strip()
+            if _field_value_matches(combined, value):
+                return True
+    except Exception:
+        pass
     return False
+
+
+def _field_value_matches(current: str, expected: str) -> bool:
+    if not current or not expected:
+        return False
+    parsed_current = _parse_ui_date_token(current)
+    parsed_expected = _parse_ui_date_token(expected)
+    if parsed_current and parsed_expected:
+        return parsed_current == parsed_expected
+    if expected.casefold() in current.casefold():
+        return True
+    return False
+
+
+def _parse_ui_date_token(text: str) -> tuple[int, int, int] | None:
+    import re
+
+    match = re.search(r"(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})", text)
+    if not match:
+        return None
+    day, month, year = (int(match.group(i)) for i in range(1, 4))
+    if year < 100:
+        year += 2000
+    return (year, month, day)
 
 
 def _find_field_validation_errors(frame: Frame) -> list[tuple[str, str]]:
@@ -2333,6 +3425,34 @@ def menuitem_label_aliases(label: str) -> tuple[str, ...]:
     return aliases.get(text.casefold(), (text,))
 
 
+def _dialog_button_in_container(
+    container: Locator,
+    label: str,
+    *,
+    exact: bool,
+) -> Locator | None:
+    probes: list[Locator] = [
+        container.get_by_role("button", name=label, exact=exact),
+        container.locator(f'button[aria-label="{_css_string(label)}"]'),
+        container.locator(f'input[type="button"][value="{_css_string(label)}"]'),
+        container.locator(f'a[role="button"][aria-label="{_css_string(label)}"]'),
+    ]
+    if exact:
+        probes.insert(
+            1,
+            container.locator("button").filter(
+                has_text=re.compile(f"^{re.escape(label)}$")
+            ),
+        )
+    for probe in probes:
+        try:
+            if probe.count() and probe.first.is_visible():
+                return probe.first
+        except Exception:
+            continue
+    return None
+
+
 def _css_string(value: str | None) -> str:
     return (value or "").replace("\\", "\\\\").replace('"', '\\"')
 
@@ -2372,6 +3492,109 @@ def _dialog_locator_text(dialog: Locator) -> str:
     except Exception:
         pass
     return "\n".join(chunk for chunk in chunks if chunk)
+
+
+@dataclass(frozen=True, slots=True)
+class _PostingDialogRule:
+    markers: tuple[str, ...]
+    button: str
+
+
+_KNOWN_POSTING_DIALOG_RULES: tuple[_PostingDialogRule, ...] = (
+    _PostingDialogRule(
+        (
+            "Confirma que desea registrar la factura",
+            "desea registrar la factura",
+            "confirmar el registro",
+        ),
+        "Sí",
+    ),
+    _PostingDialogRule(
+        (
+            "Quiere abrir la factura registrada",
+            "se movió a la ventana de facturas de venta registradas",
+        ),
+        "No",
+    ),
+    _PostingDialogRule(
+        (
+            "transmisión de documentos sii",
+            "configurar la transmisión",
+        ),
+        "No",
+    ),
+)
+
+_KNOWN_PAGE_PROMPT_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("transmisión de documentos sii", "configurar la transmisión"), "No"),
+)
+
+_POSTING_SUCCESS_DIALOG_MARKERS: tuple[str, ...] = (
+    "se registró con el número",
+    "la factura se registró",
+    "se movió a la ventana de facturas de venta registradas",
+    "¿quiere abrir la factura registrada",
+)
+
+
+def _looks_like_confirmation_dialog(text: str) -> bool:
+    if "?" not in text and "¿" not in text:
+        return False
+    folded = _fold_dialog_text(text)
+    return any(
+        token in folded
+        for token in ("si", "no", "aceptar", "cancelar", "ok")
+    )
+
+
+_POSTING_DATE_CHANGE_NOTICE_MARKERS = (
+    "Ha cambiado el Fecha registro en el pedido de venta",
+    "Ha cambiado la Fecha registro en el pedido de venta",
+    "Posting Date in the sales order has changed",
+    "precios y descuentos de las líneas de ventas",
+    "prices and discounts of the sales lines",
+)
+
+
+def _accept_bc_notice_dialog(
+    frame: Frame,
+    markers: tuple[str, ...],
+) -> bool:
+    containers: list[Locator] = []
+    try:
+        layered = frame.locator(
+            '[role="dialog"], [role="alertdialog"], [aria-modal="true"]'
+        )
+        for index in range(layered.count()):
+            candidate = layered.nth(index)
+            try:
+                if candidate.is_visible():
+                    containers.append(candidate)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    containers.append(frame.locator("body"))
+    for container in containers:
+        try:
+            text = container.inner_text(timeout=800)
+        except Exception:
+            continue
+        if not _confirmation_visible(text, markers, loose=True):
+            continue
+        for label in ("Aceptar", "OK"):
+            button = _dialog_button_in_container(
+                container,
+                label,
+                exact=label == "OK",
+            )
+            if button is not None:
+                try:
+                    button.evaluate("(element) => element.click()")
+                    return True
+                except Exception:
+                    continue
+    return False
 
 
 def _confirmation_visible(

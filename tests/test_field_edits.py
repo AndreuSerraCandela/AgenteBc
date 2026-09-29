@@ -51,14 +51,12 @@ def test_edit_mode_markers_include_spanish_labels() -> None:
     from agentebc.web_preview import (
         _EDIT_ACTIVATE_PATTERNS,
         _EDIT_BUTTON_LABELS,
-        _EDIT_MODE_ACTIVE_PATTERNS,
         _EDIT_MODE_MARKERS,
     )
 
     assert "Editar" in _EDIT_BUTTON_LABELS
     assert "Realizar cambios en la página" in _EDIT_BUTTON_LABELS
     assert "Realizar cambios" in _EDIT_ACTIVATE_PATTERNS
-    assert "solo lectura" in _EDIT_MODE_ACTIVE_PATTERNS
     assert "Guardar" in _EDIT_MODE_MARKERS
 
 

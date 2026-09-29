@@ -38,6 +38,7 @@ class DialogStep:
     markers: tuple[str, ...]
     button: str
     selection: str | None = None
+    optional: bool = False
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "DialogStep":
@@ -52,6 +53,7 @@ class DialogStep:
             ),
             button=str(value.get("button", "Sí")).strip() or "Sí",
             selection=_optional_text(value.get("selection")),
+            optional=bool(value.get("optional", False)),
         )
         step.validate()
         return step

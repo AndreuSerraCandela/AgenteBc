@@ -1,0 +1,34 @@
+{
+  "presets": [
+    {
+      "id": "sales_invoice_register_current_month",
+      "label": "Registrar facturas de venta (mes en curso)",
+      "spec": {
+        "type_id": "sales_invoice",
+        "action_id": "registrar_factura",
+        "date_filter": {
+          "field": "posting_date",
+          "dynamic": "current_month"
+        },
+        "limit": 200,
+        "dry_run": true,
+        "on_error": "report_and_continue"
+      }
+    },
+    {
+      "id": "sales_invoice_register_current_year",
+      "label": "Registrar facturas de venta (año en curso)",
+      "spec": {
+        "type_id": "sales_invoice",
+        "action_id": "registrar_factura",
+        "date_filter": {
+          "field": "posting_date",
+          "dynamic": "current_year"
+        },
+        "limit": 500,
+        "dry_run": true,
+        "on_error": "report_and_continue"
+      }
+    }
+  ]
+}

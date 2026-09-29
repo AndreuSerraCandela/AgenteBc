@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from .bc_client import BusinessCentralReadClient
+
+_GUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 from .document_types import DocumentTypeDefinition
 
 
@@ -16,6 +22,7 @@ class DocumentReference:
     status: str
     system_id: str
     posting_date: str | None
+    extra_fields: tuple[tuple[str, str], ...] = ()
 
 
 class DocumentNotFoundError(LookupError):
@@ -95,7 +102,7 @@ class DocumentReader:
         )
         selected_fields = set(definition.odata_select_fields.values())
         selected_fields.add(definition.odata_key_field)
-        query = urlencode(
+        query = bc_urlencode(
             {
                 "company": company,
                 "$filter": " and ".join(filters),
@@ -129,3 +136,44 @@ class DocumentReader:
 
 def _odata_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def bc_urlencode(params: dict[str, object]) -> str:
+    """Query string para BC: espacios como %20, no + (el cliente web interpreta + literal)."""
+    normalized = {str(key): str(value) for key, value in params.items()}
+    return urlencode(normalized, quote_via=quote)
+
+
+def resolve_company_for_web_url(
+    client: BusinessCentralReadClient,
+    company_name: str,
+    *,
+    use_guid: bool = False,
+) -> str:
+    """Parámetro company en URLs web BC.
+
+    Por defecto usa el **nombre** (con ``bc_urlencode`` → ``%20``). Algunos
+    entornos aceptan GUID OData; active ``use_guid`` solo si su tenant lo requiere.
+    """
+    name = company_name.strip()
+    if not name or _GUID_PATTERN.match(name):
+        return name
+    if not use_guid:
+        return name
+    try:
+        query = bc_urlencode(
+            {
+                "$filter": f"Name eq {_odata_literal(name)}",
+                "$select": "Id",
+                "$top": "1",
+            }
+        )
+        data = client.get(f"Company?{query}")
+        rows = data.get("value", []) if isinstance(data, dict) else data
+        if rows and isinstance(rows[0], dict):
+            company_id = rows[0].get("Id") or rows[0].get("id")
+            if company_id:
+                return str(company_id)
+    except Exception:
+        pass
+    return name

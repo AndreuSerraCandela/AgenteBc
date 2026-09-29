@@ -200,6 +200,116 @@ def test_normalizes_misaligned_positional_row_for_customer_blocked() -> None:
     assert "CustBlockedErrorMessage" in (messages[0].call_stack or "")
 
 
+def test_error_messages_page_in_dialog_title() -> None:
+    from agentebc.web_preview import _is_error_messages_page
+
+    dialog = (
+        "Mensajes de error\n"
+        "Tipo de mensaje\nDescripción\nContexto\n"
+        "Error\tNo puede asignar números nuevos.\tSales Header:..."
+    )
+    assert _is_error_messages_page(dialog)
+
+
+def test_posting_success_not_on_page_copy_without_dialog() -> None:
+    from agentebc.web_preview import (
+        _POSTING_SUCCESS_DIALOG_MARKERS,
+        _confirmation_visible,
+    )
+
+    menu_only = (
+        "Facturas de venta\n"
+        "Facturas de venta registradas\n"
+        "Estado lanzado\n"
+        "Registrar factura"
+    )
+    assert not _confirmation_visible(
+        menu_only,
+        _POSTING_SUCCESS_DIALOG_MARKERS,
+    )
+
+
+def test_posting_success_marker_detected() -> None:
+    from agentebc.web_preview import (
+        _POSTING_SUCCESS_DIALOG_MARKERS,
+        _confirmation_visible,
+    )
+
+    text = (
+        "La factura se registró con el número EX26-M1151 y se movió a la "
+        "ventana de facturas de venta registradas. "
+        "¿Quiere abrir la factura registrada?"
+    )
+    assert _confirmation_visible(
+        text,
+        _POSTING_SUCCESS_DIALOG_MARKERS,
+        loose=True,
+    )
+
+
+def test_post_register_dialog_marker_matches() -> None:
+    text = (
+        "La factura se registró con el número EX26-M1151 y se movió a la "
+        "ventana de facturas de venta registradas. "
+        "¿Quiere abrir la factura registrada?"
+    )
+    assert _confirmation_visible(
+        text,
+        ("¿Quiere abrir la factura registrada",),
+    )
+
+
+def test_cap_wait_seconds_respects_posting_deadline() -> None:
+    preview = BusinessCentralWebPreview.__new__(BusinessCentralWebPreview)
+    deadline = __import__("time").monotonic() + 5.0
+    capped = preview._cap_wait_seconds(90.0, deadline)
+    assert 0.0 < capped <= 5.5
+
+
+def test_all_dialog_steps_handled() -> None:
+    action = ActionDefinition(
+        id="registrar_factura",
+        label="Registrar",
+        safety="diagnostic",
+        auto_confirm=True,
+        dialog_steps=(
+            DialogStep(
+                markers=("¿Confirma que desea registrar la factura",),
+                button="Sí",
+            ),
+            DialogStep(
+                markers=("¿Quiere abrir la factura registrada",),
+                button="No",
+            ),
+        ),
+    )
+    preview = BusinessCentralWebPreview.__new__(BusinessCentralWebPreview)
+
+    assert preview._all_dialog_steps_handled(action, {0, 1}) is True
+    assert preview._all_dialog_steps_handled(action, {0}) is False
+    assert preview._all_dialog_steps_handled(action, set()) is False
+
+    optional_first = ActionDefinition(
+        id="registrar_factura",
+        label="Registrar",
+        safety="diagnostic",
+        auto_confirm=True,
+        dialog_steps=(
+            DialogStep(
+                markers=("¿Confirma que desea registrar la factura",),
+                button="Sí",
+                optional=True,
+            ),
+            DialogStep(
+                markers=("¿Quiere abrir la factura registrada",),
+                button="No",
+            ),
+        ),
+    )
+    assert preview._all_dialog_steps_handled(optional_first, {1}) is True
+    assert preview._required_dialog_steps_pending(optional_first, {1}) is False
+
+
 def test_dialog_work_pending_while_steps_incomplete() -> None:
     action = ActionDefinition(
         id="registrar_factura",
@@ -211,13 +321,18 @@ def test_dialog_work_pending_while_steps_incomplete() -> None:
                 markers=("¿Confirma que desea registrar la factura",),
                 button="Sí",
             ),
+            DialogStep(
+                markers=("¿Quiere abrir la factura registrada",),
+                button="No",
+            ),
         ),
         result_markers=("Mensajes de error", "Registrar"),
     )
     preview = BusinessCentralWebPreview.__new__(BusinessCentralWebPreview)
 
     assert preview._dialog_work_pending(None, action, set()) is True
-    assert preview._dialog_work_pending(None, action, {0}) is False
+    assert preview._dialog_work_pending(None, action, {0}) is True
+    assert preview._dialog_work_pending(None, action, {0, 1}) is False
 
 
 def test_extracts_shared_details_from_message_dialog() -> None:
@@ -253,3 +368,46 @@ def test_menu_aria_parts_supports_nested_path() -> None:
     selectors = action_bar_expand_selectors()
     assert any("Más opciones" in selector for selector in selectors)
     assert any("Mostrar acciones secundarias" in selector for selector in selectors)
+
+
+def test_posting_date_change_notice_marker() -> None:
+    from agentebc.web_preview import _confirmation_visible
+
+    text = (
+        "Información en una línea\n"
+        "Ha cambiado el Fecha registro en el pedido de venta, lo que puede "
+        "afectar a los precios y descuentos de las líneas de ventas."
+    )
+    assert _confirmation_visible(
+        text,
+        (
+            "Ha cambiado el Fecha registro en el pedido de venta",
+            "precios y descuentos de las líneas de ventas",
+        ),
+        loose=True,
+    )
+
+
+def test_page_is_in_edit_mode_requires_save_not_discard_only() -> None:
+    from unittest.mock import MagicMock
+
+    from agentebc.web_preview import _page_is_in_edit_mode
+
+    frame = MagicMock()
+    discard = MagicMock()
+    discard.count.return_value = 1
+    discard.first.is_visible.return_value = True
+    guardar = MagicMock()
+    guardar.count.return_value = 0
+
+    def role_side_effect(role: str, name: str = "", **kwargs: object) -> MagicMock:
+        if role == "button" and name in {"Guardar", "Save"}:
+            return guardar
+        if role == "button" and name == "Descartar":
+            return discard
+        return MagicMock(count=MagicMock(return_value=0))
+
+    frame.get_by_role.side_effect = role_side_effect
+    frame.locator.return_value = MagicMock(count=MagicMock(return_value=0))
+
+    assert _page_is_in_edit_mode(frame) is False

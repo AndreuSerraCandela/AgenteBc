@@ -24,6 +24,7 @@ def _boolean(value: str, *, name: str) -> bool:
 @dataclass(frozen=True, slots=True)
 class Settings:
     odata_base_url: str | None
+    web_base_url: str | None
     auth_mode: str
     username: str | None
     password: str | None
@@ -36,11 +37,16 @@ class Settings:
     sql_connection_string: str | None
     tls_verify: bool
     request_timeout_seconds: float
+    web_action_idle_timeout_seconds: float
+    web_action_max_attempts: int
     browser_headless: bool
     browser_channel: str | None
     ai_provider: str | None
+    worker_ai_provider: str | None
     lm_studio_url: str | None
     lm_studio_model: str | None
+    worker_lm_studio_url: str | None
+    worker_lm_studio_model: str | None
     deepseek_api_key: str | None
     deepseek_model: str | None
     deepseek_url: str | None
@@ -56,6 +62,9 @@ class Settings:
     share_url: str | None
     share_token: str | None
     share_user: str | None
+    web_company_use_guid: bool
+    web_use_windows_session: bool
+    web_browser_profile: Path | None
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -79,6 +88,9 @@ class Settings:
         sql_env_file = _optional("AGENTEBC_SQL_ENV_FILE")
         if sql_env_file:
             _load_env_file(Path(sql_env_file).expanduser(), override=override)
+        smtp_env_file = _optional("AGENTEBC_SMTP_ENV_FILE")
+        if smtp_env_file:
+            _load_env_file(Path(smtp_env_file).expanduser(), override=override)
 
     @classmethod
     def _build_from_current_environment(cls) -> "Settings":
@@ -94,6 +106,30 @@ class Settings:
             ) from exc
         if timeout <= 0:
             raise ConfigurationError("AGENTEBC_REQUEST_TIMEOUT debe ser positivo")
+
+        idle_text = os.getenv("AGENTEBC_WEB_ACTION_IDLE_TIMEOUT", "60")
+        try:
+            web_action_idle = float(idle_text)
+        except ValueError as exc:
+            raise ConfigurationError(
+                "AGENTEBC_WEB_ACTION_IDLE_TIMEOUT debe ser numérico"
+            ) from exc
+        if web_action_idle <= 0:
+            raise ConfigurationError(
+                "AGENTEBC_WEB_ACTION_IDLE_TIMEOUT debe ser positivo"
+            )
+
+        attempts_text = os.getenv("AGENTEBC_WEB_ACTION_MAX_ATTEMPTS", "3")
+        try:
+            web_action_max_attempts = int(attempts_text)
+        except ValueError as exc:
+            raise ConfigurationError(
+                "AGENTEBC_WEB_ACTION_MAX_ATTEMPTS debe ser un entero"
+            ) from exc
+        if web_action_max_attempts < 1:
+            raise ConfigurationError(
+                "AGENTEBC_WEB_ACTION_MAX_ATTEMPTS debe ser al menos 1"
+            )
 
         web_timeout_text = os.getenv("AGENTEBC_DEEPSEEK_WEB_TIMEOUT", "90")
         try:
@@ -123,6 +159,7 @@ class Settings:
 
         settings = cls(
             odata_base_url=_optional("AGENTEBC_ODATA_BASE_URL"),
+            web_base_url=_optional("AGENTEBC_WEB_BASE_URL"),
             auth_mode=os.getenv("AGENTEBC_AUTH_MODE", "windows").strip().lower(),
             username=(
                 _optional("AGENTEBC_USERNAME") or _optional("BC_USERNAME")
@@ -147,6 +184,8 @@ class Settings:
                 name="AGENTEBC_TLS_VERIFY",
             ),
             request_timeout_seconds=timeout,
+            web_action_idle_timeout_seconds=web_action_idle,
+            web_action_max_attempts=web_action_max_attempts,
             browser_headless=_boolean(
                 os.getenv("AGENTEBC_BROWSER_HEADLESS", "false"),
                 name="AGENTEBC_BROWSER_HEADLESS",
@@ -157,8 +196,11 @@ class Settings:
                 lm_studio_url=_optional("AGENTEBC_LM_STUDIO_URL"),
                 deepseek_api_key=_optional("AGENTEBC_DEEPSEEK_API_KEY"),
             ),
+            worker_ai_provider=_optional_worker_ai_provider(),
             lm_studio_url=_optional("AGENTEBC_LM_STUDIO_URL"),
             lm_studio_model=_optional("AGENTEBC_LM_STUDIO_MODEL"),
+            worker_lm_studio_url=_optional("AGENTEBC_WORKER_LM_STUDIO_URL"),
+            worker_lm_studio_model=_optional("AGENTEBC_WORKER_LM_STUDIO_MODEL"),
             deepseek_api_key=_optional("AGENTEBC_DEEPSEEK_API_KEY"),
             deepseek_model=_optional("AGENTEBC_DEEPSEEK_MODEL"),
             deepseek_url=_optional("AGENTEBC_DEEPSEEK_URL"),
@@ -184,9 +226,32 @@ class Settings:
             ),
             share_token=_optional("AGENTEBC_SHARE_TOKEN"),
             share_user=_optional("AGENTEBC_SHARE_USER"),
+            web_company_use_guid=_boolean(
+                os.getenv("AGENTEBC_WEB_COMPANY_USE_GUID", "false"),
+                name="AGENTEBC_WEB_COMPANY_USE_GUID",
+            ),
+            web_use_windows_session=_boolean(
+                os.getenv("AGENTEBC_WEB_USE_WINDOWS_SESSION", "false"),
+                name="AGENTEBC_WEB_USE_WINDOWS_SESSION",
+            ),
+            web_browser_profile=(
+                Path(profile).expanduser().resolve()
+                if (profile := _optional("AGENTEBC_WEB_BROWSER_PROFILE"))
+                else None
+            ),
         )
         settings.validate()
         return settings
+
+    def resolve_web_client_base_url(self) -> str | None:
+        """Base URL del cliente web BC (Playwright). Sin /ODataV4."""
+        if self.web_base_url:
+            return self.web_base_url.rstrip("/")
+        if not self.odata_base_url:
+            return None
+        if "/ODataV4" in self.odata_base_url:
+            return self.odata_base_url.rsplit("/ODataV4", 1)[0].rstrip("/")
+        return self.odata_base_url.rstrip("/")
 
     @property
     def ai_enabled(self) -> bool:
@@ -204,13 +269,9 @@ class Settings:
                 "AGENTEBC_AUTH_MODE debe ser windows o basic"
             )
         if self.odata_base_url:
-            parsed = urlparse(self.odata_base_url)
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                raise ConfigurationError("AGENTEBC_ODATA_BASE_URL no es una URL válida")
-            if parsed.scheme != "https":
-                raise ConfigurationError(
-                    "Business Central debe consultarse mediante HTTPS"
-                )
+            _validate_bc_base_url("AGENTEBC_ODATA_BASE_URL", self.odata_base_url)
+        if self.web_base_url:
+            _validate_bc_base_url("AGENTEBC_WEB_BASE_URL", self.web_base_url)
         if self.source_path and not self.source_path.is_dir():
             raise ConfigurationError(
                 f"AGENTEBC_SOURCE_PATH no es un directorio: {self.source_path}"
@@ -253,6 +314,8 @@ class Settings:
     def safe_summary(self) -> dict[str, object]:
         return {
             "odata_base_url": self.odata_base_url,
+            "web_base_url": self.web_base_url,
+            "web_client_base_url": self.resolve_web_client_base_url(),
             "auth_mode": self.auth_mode,
             "username_configured": bool(self.username),
             "password_configured": bool(self.password),
@@ -271,10 +334,21 @@ class Settings:
             "sql_configured": bool(self.sql_connection_string),
             "tls_verify": self.tls_verify,
             "request_timeout_seconds": self.request_timeout_seconds,
+            "web_action_idle_timeout_seconds": (
+                self.web_action_idle_timeout_seconds
+            ),
+            "web_action_max_attempts": self.web_action_max_attempts,
             "browser_headless": self.browser_headless,
             "browser_channel": self.browser_channel,
             "ai_provider": self.ai_provider,
             "ai_enabled": self.ai_enabled,
+            "worker_ai_provider": self.worker_ai_provider,
+            "worker_lm_studio_configured": bool(
+                self.worker_lm_studio_url or self.lm_studio_url
+            ),
+            "worker_lm_studio_model": (
+                self.worker_lm_studio_model or self.lm_studio_model
+            ),
             "lm_studio_configured": bool(self.lm_studio_url),
             "lm_studio_model": self.lm_studio_model,
             "deepseek_configured": bool(self.deepseek_api_key),
@@ -301,11 +375,41 @@ class Settings:
         }
 
 
+def _validate_bc_base_url(name: str, url: str) -> None:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ConfigurationError(f"{name} no es una URL válida")
+    if parsed.scheme != "https":
+        host = (parsed.hostname or "").lower()
+        local_http = parsed.scheme == "http" and host in {
+            "localhost",
+            "127.0.0.1",
+            "::1",
+        }
+        if not local_http:
+            raise ConfigurationError(
+                f"{name} debe usar HTTPS "
+                "(excepto http://localhost o 127.0.0.1 en desarrollo)"
+            )
+
+
 def _load_browser_channel() -> str | None:
     try:
         return normalize_browser_channel(_optional("AGENTEBC_BROWSER_CHANNEL"))
     except ValueError as exc:
         raise ConfigurationError(str(exc)) from exc
+
+
+def _optional_worker_ai_provider() -> str | None:
+    raw = _optional("AGENTEBC_WORKER_AI_PROVIDER")
+    if not raw:
+        return None
+    normalized = raw.strip().lower()
+    if normalized not in {"lm_studio", "deepseek"}:
+        raise ConfigurationError(
+            "AGENTEBC_WORKER_AI_PROVIDER debe ser lm_studio o deepseek"
+        )
+    return normalized
 
 
 def _resolve_ai_provider(

@@ -43,9 +43,19 @@ class BusinessCentralReadClient:
         except requests.RequestException as exc:
             status = getattr(exc.response, "status_code", None)
             detail = f" (HTTP {status})" if status else ""
-            raise BusinessCentralReadError(
-                f"No se pudo consultar Business Central{detail}"
-            ) from exc
+            message = f"No se pudo consultar Business Central{detail}"
+            response = exc.response
+            if response is not None:
+                try:
+                    body = response.json()
+                    err = body.get("error") if isinstance(body, dict) else None
+                    if isinstance(err, dict):
+                        bc_msg = str(err.get("message", "")).strip()
+                        if bc_msg:
+                            message = f"{message}: {bc_msg}"
+                except (ValueError, AttributeError):
+                    pass
+            raise BusinessCentralReadError(message) from exc
 
         try:
             data = response.json()

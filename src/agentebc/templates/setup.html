@@ -63,6 +63,11 @@
             <label for="AGENTEBC_ODATA_BASE_URL">URL OData</label>
             <input id="AGENTEBC_ODATA_BASE_URL" name="AGENTEBC_ODATA_BASE_URL" value="{{ values.AGENTEBC_ODATA_BASE_URL or '' }}" placeholder="https://servidor/instancia/ODataV4" required>
           </div>
+          <div class="wide">
+            <label for="AGENTEBC_WEB_BASE_URL">URL cliente web (Playwright)</label>
+            <input id="AGENTEBC_WEB_BASE_URL" name="AGENTEBC_WEB_BASE_URL" value="{{ values.AGENTEBC_WEB_BASE_URL or '' }}" placeholder="https://servidor/instancia (opcional; sin /ODataV4)">
+            <p class="hint">Si OData y el navegador usan distinto host o puerto, indíquelo aquí.</p>
+          </div>
           <div>
             <label for="AGENTEBC_COMPANY">Empresa por defecto</label>
             <input id="AGENTEBC_COMPANY" name="AGENTEBC_COMPANY" value="{{ values.AGENTEBC_COMPANY or '' }}" required>

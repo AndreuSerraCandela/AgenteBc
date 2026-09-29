@@ -3,3 +3,5 @@ agentebc = agentebc.cli:main
 agentebc-desktop = agentebc.desktop:main
 agentebc-portal = agentebc.portal:main
 agentebc-web = agentebc.webapp:main
+agentebc-worker = agentebc_worker.cli:main
+agentebc-worker-desktop = agentebc_worker.desktop:main

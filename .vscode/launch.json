@@ -33,6 +33,33 @@
       },
       "console": "integratedTerminal",
       "justMyCode": true
+    },
+    {
+      "name": "AgenteBc Worker (escritorio)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "agentebc_worker.desktop",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "AGENTEBC_ENV_FILE": "${workspaceFolder}/.env"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "AgenteBc Worker (HTTP 8766)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "agentebc_worker.cli",
+      "args": ["serve", "--host", "127.0.0.1", "--port", "8766"],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/src",
+        "AGENTEBC_ENV_FILE": "${workspaceFolder}/.env"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
     }
   ]
 }
