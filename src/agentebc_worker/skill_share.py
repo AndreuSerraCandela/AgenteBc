@@ -165,6 +165,11 @@ def _portal_share_token() -> str:
     return os.getenv("AGENTEBC_SHARE_TOKEN", "").strip()
 
 
+def share_portal_configured() -> bool:
+    """True si el Worker puede leer el buzón de skills en agentebc.malla.es."""
+    return bool(portal_base_url() and _portal_share_token())
+
+
 def share_skill_via_portal(
     skill: WorkerSkill,
     *,

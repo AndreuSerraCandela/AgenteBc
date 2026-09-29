@@ -26,7 +26,11 @@ from .pending import (
 from .field_edits import describe_before_action_edits, spec_with_posting_date_mode
 from .runner import run_job
 from .skill_editor import register_skill_routes
-from .skill_share import SkillShareStore, merged_pending_count
+from .skill_share import (
+    SkillShareStore,
+    merged_pending_count,
+    share_portal_configured,
+)
 from .simple_portal import register_simple_portal_routes
 from .skill_connection import settings_for_skill
 from .skill_postrun import finalize_skill_batch, postrun_summary
@@ -56,9 +60,14 @@ _PAGE = """
 </head>
 <body>
   <h1>AgenteBc Worker</h1>
-  <p><a href="/portal"><strong>Modo usuario</strong></a> — solo skill y ejecutar.</p>
+  <p>
+    <a href="/portal"><strong>Modo usuario</strong></a>
+    · <a href="/skills"><strong>Editor de skills</strong></a>
+    {% if skills_inbox_count is not none %}
+    · <a href="/skills/inbox"><strong>Skills ({{ skills_inbox_count }})</strong></a>
+    {% endif %}
+  </p>
   <p>Vista previa de trabajos de registro. AgenteBc consultor no se modifica aquí.</p>
-  <p><a href="/skills"><strong>Editor de skills</strong></a> — fecha registro, filtros OData, informe (también en el formulario de abajo).</p>
 
   <section>
     <h2>Skill (trabajo empaquetado)</h2>
@@ -208,12 +217,18 @@ def create_app() -> Flask:
         inbox_count_fn=lambda: merged_pending_count(share_store),
     )
 
+    def skills_inbox_nav_count() -> int | None:
+        if not share_portal_configured():
+            return None
+        return merged_pending_count(share_store)
+
     @app.get("/")
     def index():
         return render_template_string(
             _PAGE,
             presets=store().all(),
             skills=skill_store().all(),
+            skills_inbox_count=skills_inbox_nav_count(),
             preview=None,
             error=None,
             saved_message=None,
@@ -263,6 +278,7 @@ def create_app() -> Flask:
             _PAGE,
             presets=store().all(),
             skills=skill_store().all(),
+            skills_inbox_count=skills_inbox_nav_count(),
             preview=preview_obj,
             error=err,
             saved_message=_compile_banner(compile_info) if compile_info else None,
@@ -316,6 +332,7 @@ def create_app() -> Flask:
             _PAGE,
             presets=store().all(),
             skills=skill_store().all(),
+            skills_inbox_count=skills_inbox_nav_count(),
             preview=preview_obj,
             error=err,
             saved_message=f"Preview del skill «{skill_id}» (skill_id guardado para informe).",
@@ -343,6 +360,7 @@ def create_app() -> Flask:
             _PAGE,
             presets=store().all(),
             skills=skill_store().all(),
+            skills_inbox_count=skills_inbox_nav_count(),
             preview=preview_obj,
             error=err,
             saved_message=None,
@@ -374,6 +392,7 @@ def create_app() -> Flask:
             _PAGE,
             presets=store().all(),
             skills=skill_store().all(),
+            skills_inbox_count=skills_inbox_nav_count(),
             preview=preview_obj,
             error=err,
             saved_message=saved_message,
@@ -454,6 +473,7 @@ def create_app() -> Flask:
             _PAGE,
             presets=store().all(),
             skills=skill_store().all(),
+            skills_inbox_count=skills_inbox_nav_count(),
             preview=preview_obj,
             error=err,
             saved_message=None,

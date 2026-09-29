@@ -43,14 +43,40 @@ _PORTAL_PAGE = """
     .error { color: #a80000; margin-top: 16px; }
     .ok { background: #dff6dd; border-left: 4px solid #107c10; padding: 12px; margin-top: 20px; white-space: pre-wrap; }
     .hint { font-size: 13px; color: #555; font-weight: normal; }
+    nav.top { margin-bottom: 20px; font-size: 15px; }
+    nav.top a { color: #0067b8; text-decoration: none; font-weight: 600; }
+    nav.top a:hover { text-decoration: underline; }
+    .skills-banner {
+      background: #eef6ff; border: 1px solid #b4d6fa; border-radius: 6px;
+      padding: 12px 14px; margin-bottom: 20px; font-size: 14px;
+    }
+    .skills-banner a { color: #0067b8; font-weight: 600; }
+    .saved-banner {
+      background: #dff6dd; border-left: 4px solid #107c10;
+      padding: 10px 12px; margin-bottom: 16px; font-size: 14px;
+    }
     footer { margin-top: 32px; font-size: 13px; color: #666; }
     footer a { color: #0067b8; }
     details pre { background: #f4f4f4; padding: 10px; overflow: auto; white-space: pre-wrap; }
   </style>
 </head>
 <body>
+  <nav class="top">
+    <a href="/portal">Registro</a>
+    {% if share_configured %}
+      · <a href="/skills/inbox">Skills ({{ inbox_count }})</a>
+    {% endif %}
+    · <a href="/">Modo consultor</a>
+  </nav>
   <h1>Registro en Business Central</h1>
   <p class="lead">Elija el trabajo y pulse Ejecutar. Se registrarán las facturas del criterio del skill.</p>
+  {% if saved_message %}<div class="saved-banner">{{ saved_message }}</div>{% endif %}
+  {% if share_configured and inbox_count %}
+  <div class="skills-banner">
+    Hay {{ inbox_count }} skill(s) del consultor pendientes de descargar.
+    <a href="/skills/inbox">Abrir Skills ({{ inbox_count }})</a>
+  </div>
+  {% endif %}
 
   <form method="post" action="{{ url_for('portal_run') }}" id="run-form"
         onsubmit="document.getElementById('go').disabled=true; document.getElementById('go').textContent='Ejecutando…';">
@@ -91,9 +117,10 @@ _PORTAL_PAGE = """
   {% endif %}
 
   <footer>
-    <a href="/">Modo consultor / avanzado</a>
-    · <a href="/skills">Editor de skills</a>
-    {% if inbox_count %} · <a href="/skills/inbox">{{ inbox_count }} skill(s) en buzón</a>{% endif %}
+    <a href="/skills">Editor de skills</a>
+    {% if share_configured %}
+      · <a href="/skills/inbox">Skills ({{ inbox_count }})</a>
+    {% endif %}
   </footer>
   <script>
     const sel = document.getElementById('skill_id');
@@ -129,14 +156,23 @@ def register_simple_portal_routes(
 ) -> None:
     @app.get("/portal")
     def portal_home():
+        from .skill_share import share_portal_configured
+
+        skill_id = request.args.get("skill_id", "").strip()
+        saved = request.args.get("saved", "").strip()
+        saved_message = None
+        if saved == "skill":
+            saved_message = "Skill descargado. Ya puede ejecutarlo abajo."
         return _render_portal(
             skill_store(),
-            form={"skill_id": "", "company": "", "posting_date": "today"},
+            form={"skill_id": skill_id, "company": "", "posting_date": "today"},
             posting_field_label=DEFAULT_POSTING_DATE_FIELD_LABEL,
             error=None,
             summary=None,
             report_text=None,
             inbox_count=_inbox_count(inbox_count_fn),
+            share_configured=share_portal_configured(),
+            saved_message=saved_message,
         )
 
     @app.post("/portal/run")
@@ -204,6 +240,8 @@ def register_simple_portal_routes(
             report_text = format_report_plain_text(batch_report)
         except Exception as exc:
             err = str(exc)
+        from .skill_share import share_portal_configured
+
         return _render_portal(
             skill_store(),
             form=form,
@@ -212,6 +250,8 @@ def register_simple_portal_routes(
             report_text=report_text,
             inbox_count=_inbox_count(inbox_count_fn),
             posting_field_label=posting_label if skill_id else DEFAULT_POSTING_DATE_FIELD_LABEL,
+            share_configured=share_portal_configured(),
+            saved_message=None,
         )
 
 
@@ -223,6 +263,8 @@ def _render_portal(
     summary: str | None,
     report_text: str | None,
     inbox_count: int,
+    share_configured: bool,
+    saved_message: str | None,
     posting_field_label: str = DEFAULT_POSTING_DATE_FIELD_LABEL,
 ):
     skills_view = []
@@ -239,6 +281,8 @@ def _render_portal(
         summary=summary,
         report_text=report_text,
         inbox_count=inbox_count,
+        share_configured=share_configured,
+        saved_message=saved_message,
         posting_field_label=posting_field_label,
     )
 

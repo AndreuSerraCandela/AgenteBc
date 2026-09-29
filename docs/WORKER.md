@@ -41,8 +41,8 @@ API: `POST /api/skills/share` (JSON + cabecera `X-AgenteBc-Share-Token`).
 1. Instalar **AgenteBc Worker** desde el portal o el `.exe` de setup.
 2. Abrir la app (WebView → `/portal`).
 3. Configurar `.env` en `%LOCALAPPDATA%\AgenteBC\` (OData, web BC, auth) o usar `connection` en el skill.
-4. En el Worker: **Buzón de skills** (`/skills/inbox`) si el consultor publicó skills al portal
-   (`AGENTEBC_SHARE_URL` + `AGENTEBC_SHARE_TOKEN` en el `.env` del usuario).
+4. En el portal de registro (`/portal`): enlace **Skills (N)** → descargar e instalar en el PC
+   (`AGENTEBC_SHARE_URL` + `AGENTEBC_SHARE_TOKEN` en el `.env` del usuario, mismo token que el servidor).
 
 Variables útiles:
 

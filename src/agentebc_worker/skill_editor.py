@@ -614,23 +614,34 @@ _DEFAULT_FORM = {
 
 _INBOX_PAGE = """
 <!doctype html>
-<html lang="es"><head><meta charset="utf-8"><title>Buzón de skills</title></head>
+<html lang="es"><head><meta charset="utf-8"><title>Skills ({{ items|length }})</title></head>
 <body style="font-family:Segoe UI,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;">
-<p><a href="/portal">← Modo usuario</a> · <a href="/skills">Editor</a></p>
-<h1>Buzón de skills</h1>
+<p><a href="/portal">← Registro</a> · <a href="/skills">Editor</a></p>
+<h1>Skills ({{ items|length }})</h1>
+<p style="color:#444;">Skills enviados por el consultor. Descárguelos para usarlos en el portal de registro.</p>
 {% if error %}<p style="color:#a80000;">{{ error }}</p>{% endif %}
 {% if saved %}<p>{{ saved }}</p>{% endif %}
-<ul>
+{% if not share_configured %}
+<p style="background:#fff8e6;padding:10px;border-left:4px solid #c19c00;">
+  Falta <code>AGENTEBC_SHARE_URL</code> y <code>AGENTEBC_SHARE_TOKEN</code> en
+  <code>%LOCALAPPDATA%\\AgenteBC\\.env</code> (mismo token que en el servidor).
+</p>
+{% endif %}
+<ul style="list-style:none;padding:0;">
 {% for item in items %}
-  <li>
-    <strong>{{ item.skill.get('label', '?') }}</strong> ({{ item.skill.get('id', '?') }}) — {{ item.note or "Sin nota" }}
-    <form method="post" action="{{ url_for('skill_inbox_install') }}" style="display:inline;">
+  <li style="border:1px solid #ddd;border-radius:6px;padding:14px;margin-bottom:12px;">
+    <strong>{{ item.skill.get('label', '?') }}</strong>
+    <span style="color:#666;">({{ item.skill.get('id', '?') }})</span>
+    {% if item.note %}<br><span style="font-size:13px;color:#555;">{{ item.note }}</span>{% endif %}
+    <form method="post" action="{{ url_for('skill_inbox_install') }}" style="margin-top:10px;">
       <input type="hidden" name="share_id" value="{{ item.id }}">
-      <button type="submit">Instalar en este PC</button>
+      <button type="submit" style="padding:8px 16px;background:#0067b8;color:#fff;border:0;border-radius:4px;cursor:pointer;">
+        Descargar en este PC
+      </button>
     </form>
   </li>
 {% else %}
-  <li>No hay skills pendientes en el buzón.</li>
+  <li style="color:#666;">No hay skills pendientes. Cuando el consultor publique uno, aparecerá aquí.</li>
 {% endfor %}
 </ul>
 </body></html>
@@ -729,7 +740,11 @@ def register_skill_routes(
 
     @app.get("/skills/inbox")
     def skill_inbox():
-        from .skill_share import list_pending_from_portal, merge_pending_skills
+        from .skill_share import (
+            list_pending_from_portal,
+            merge_pending_skills,
+            share_portal_configured,
+        )
 
         pending = merge_pending_skills(
             inbox.list_pending(),
@@ -740,6 +755,7 @@ def register_skill_routes(
             items=pending,
             error=request.args.get("error"),
             saved=request.args.get("saved"),
+            share_configured=share_portal_configured(),
         )
 
     @app.post("/skills/inbox/install")
@@ -756,7 +772,7 @@ def register_skill_routes(
             else:
                 inbox.close(share_id)
             return redirect(
-                url_for("skill_editor", skill_id=skill.id, saved=str(path))
+                url_for("portal_home", skill_id=skill.id, saved="skill")
             )
         except Exception as exc:
             return redirect(url_for("skill_inbox", error=str(exc)))
