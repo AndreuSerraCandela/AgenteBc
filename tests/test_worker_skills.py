@@ -6,7 +6,10 @@ from pathlib import Path
 
 from agentebc_worker.dynamic_filters import resolve_dynamic_filter
 from agentebc_worker.list_documents import _odata_equals
+from agentebc_worker.job_spec import WorkerJobSpec
 from agentebc_worker.skills import (
+    SkillReport,
+    SkillReportField,
     SkillStore,
     WorkerSkill,
     parse_email_list,
@@ -65,6 +68,34 @@ def test_skill_form_report_fields_not_only_contract() -> None:
     assert skill.report_odata_fields().get("number") == "No"
     assert skill.report_odata_fields().get("contract") == "N_x00BA__Contrato"
     assert skill.spec.extra_odata_filters["Esperar_Orden_Cliente"] == "No"
+
+
+def test_report_odata_fields_omits_after_action_only_columns() -> None:
+    skill = WorkerSkill(
+        id="t",
+        label="T",
+        spec=WorkerJobSpec.from_dict(
+            {
+                "company": "C",
+                "type_id": "sales_invoice",
+                "action_id": "registrar_factura",
+                "limit": 1,
+            }
+        ),
+        report=SkillReport(
+            fields=(
+                SkillReportField(key="number", label="Nº", odata="No"),
+                SkillReportField(
+                    key="no_factura_registrada",
+                    label="Nº registrada",
+                    odata=None,
+                ),
+            )
+        ),
+    )
+    mapping = skill.report_odata_fields()
+    assert "no_factura_registrada" not in mapping
+    assert mapping.get("number") == "No"
 
 
 def test_parse_email_list() -> None:

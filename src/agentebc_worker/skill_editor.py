@@ -113,8 +113,8 @@ _EDITOR_PAGE = """
           {% endfor %}
         {% endfor %}
       </select>
-      <h3 style="margin-top:18px;background:#e8f4fc;padding:10px;border-radius:6px;">Antes de registrar (ficha BC)</h3>
-      <label><strong>Fecha registro</strong> en la factura antes de pulsar Registrar</label>
+      <h3 style="margin-top:18px;background:#e8f4fc;padding:10px;border-radius:6px;">Antes de acción (ficha BC)</h3>
+      <label><strong>Fecha registro</strong> en la ficha antes de ejecutar la acción</label>
       <select name="posting_date_before_register">
         <option value="" {% if not form.posting_date_before_register %}selected{% endif %}>No cambiar</option>
         <option value="today" {% if form.posting_date_before_register == 'today' %}selected{% endif %}>Poner fecha de hoy</option>
@@ -177,8 +177,42 @@ _EDITOR_PAGE = """
         <button type="button" id="report_add_btn" style="margin-top:0">Añadir columna</button>
       </div>
       <p id="report-column-hint" class="hint">El nº documento usa el campo clave; no hace falta añadirlo aquí.</p>
-      <label>Columnas del informe activas <span class="hint">(etiqueta | clave | campo OData; editable)</span></label>
+      <label>Columnas del informe activas <span class="hint">(etiqueta | clave | campo OData; OData vacío si se rellena después de acción)</span></label>
       <textarea name="report_fields_lines" id="report_fields_lines" rows="4" spellcheck="false">{{ form.report_fields_lines }}</textarea>
+      <h3 style="margin-top:18px;background:#f0f8e8;padding:10px;border-radius:6px;">Después de acción <span class="hint">(opcional)</span></h3>
+      <p class="hint">Consulta OData tras la acción (p. ej. comprobar fila en
+        <code>FacturasRegistradas</code>). Filtro con <code>{number}</code> = nº del documento del lote.
+        Para volcar un valor al informe, defina antes la columna arriba y elija su <strong>clave</strong>.</p>
+      <label>Servicio OData (paso después de acción)</label>
+      <input name="after_odata_service" id="after_odata_service" value="{{ form.after_odata_service }}"
+             placeholder="FacturasRegistradas">
+      <button type="button" id="load-after-odata-fields" style="margin-top:8px">Cargar campos OData (después de acción)</button>
+      <p id="after-odata-status" class="hint"></p>
+      <label>Campo filtro OData + valor</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <select name="after_filter_field" id="after_filter_field" style="flex:1;min-width:160px">
+          {% if form.after_filter_field %}
+          <option value="{{ form.after_filter_field }}" selected>{{ form.after_filter_field }}</option>
+          {% endif %}
+        </select>
+        <input name="after_filter_value" style="flex:1;min-width:160px"
+               value="{{ form.after_filter_value }}" placeholder="{number}">
+      </div>
+      <label>Filtros extra del paso OData</label>
+      <textarea name="after_extra_filter_lines" rows="2" spellcheck="false"
+                placeholder="">{{ form.after_extra_filter_lines }}</textarea>
+      <label>Guardar en informe <span class="hint">(opcional; columna ya definida arriba)</span></label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <select name="after_save_odata_field" id="after_save_odata_field" style="flex:1;min-width:160px">
+          {% if form.after_save_odata_field %}
+          <option value="{{ form.after_save_odata_field }}" selected>{{ form.after_save_odata_field }}</option>
+          {% else %}
+          <option value="">— Campo OData a leer —</option>
+          {% endif %}
+        </select>
+        <input name="after_save_report_key" style="flex:1;min-width:160px"
+               value="{{ form.after_save_report_key }}" placeholder="Clave columna informe (p. ej. posted_no)">
+      </div>
       <label>Correos informe <span class="hint">(separados por ; o ,)</span></label>
       <textarea name="notify_emails" rows="2">{{ form.notify_emails }}</textarea>
       <label>Límite documentos</label>
@@ -211,6 +245,8 @@ _EDITOR_PAGE = """
     let odataFieldList = [];
     const initialDocumentKey = {{ form.document_key_odata | tojson }};
     const initialDate = {{ form.date_odata_field | tojson }};
+    const initialAfterFilter = {{ form.after_filter_field | tojson }};
+    const initialAfterSaveOdata = {{ form.after_save_odata_field | tojson }};
     function fillSelect(selectId, fields, suggested, current, emptyLabel) {
       const sel = document.getElementById(selectId);
       sel.innerHTML = "";
@@ -326,28 +362,32 @@ _EDITOR_PAGE = """
       upsertExtraFilterLine(field, value);
     }
 
-    async function loadOdataFields() {
-      const status = document.getElementById("odata-status");
+    async function fetchOdataFieldsFromBc(odataService) {
       const typeId = document.querySelector('[name="type_id"]').value;
       const company = document.querySelector('[name="company"]').value.trim();
       if (!company) {
-        status.textContent = "Indique la empresa BC antes de cargar campos.";
-        return;
+        throw new Error("Indique la empresa BC antes de cargar campos.");
       }
+      const qs = new URLSearchParams({ type_id: typeId, company });
+      if (odataService) qs.set("odata_service", odataService);
+      const response = await fetch("/api/odata-fields?" + qs.toString());
+      const raw = await response.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (_) {
+        throw new Error(raw.slice(0, 240) || "Respuesta no JSON del servidor");
+      }
+      if (!response.ok) throw new Error(data.error || "No se pudieron cargar campos");
+      return data;
+    }
+
+    async function loadOdataFields() {
+      const status = document.getElementById("odata-status");
       status.textContent = "Cargando campos OData…";
       try {
         const odataService = document.getElementById("odata_service").value.trim();
-        const qs = new URLSearchParams({ type_id: typeId, company });
-        if (odataService) qs.set("odata_service", odataService);
-        const response = await fetch("/api/odata-fields?" + qs.toString());
-        const raw = await response.text();
-        let data;
-        try {
-          data = JSON.parse(raw);
-        } catch (_) {
-          throw new Error(raw.slice(0, 240) || "Respuesta no JSON del servidor");
-        }
-        if (!response.ok) throw new Error(data.error || "No se pudieron cargar campos");
+        const data = await fetchOdataFieldsFromBc(odataService);
         odataFieldTypes = data.field_types || {};
         odataSampleValues = data.sample_values || {};
         odataFieldList = data.fields || [];
@@ -383,6 +423,40 @@ _EDITOR_PAGE = """
         updateFilterValueEditor();
         updateReportColumnEditor();
         status.textContent = data.fields.length + " campos en «" + data.odata_service + "» (1 documento de ejemplo).";
+        status.style.color = "#555";
+      } catch (err) {
+        status.textContent = "Error: " + (err.message || String(err));
+        status.style.color = "#a80000";
+      }
+    }
+
+    async function loadAfterOdataFields() {
+      const status = document.getElementById("after-odata-status");
+      const service = document.getElementById("after_odata_service").value.trim();
+      if (!service) {
+        status.textContent = "Indique el servicio OData del paso después de acción.";
+        status.style.color = "#a80000";
+        return;
+      }
+      status.textContent = "Cargando campos OData del paso después de acción…";
+      status.style.color = "#555";
+      try {
+        const data = await fetchOdataFieldsFromBc(service);
+        fillSelect(
+          "after_filter_field",
+          data.fields,
+          data.suggested_key || [],
+          document.getElementById("after_filter_field").value || initialAfterFilter,
+          "— Campo filtro —"
+        );
+        fillSelect(
+          "after_save_odata_field",
+          data.fields,
+          data.suggested_key || [],
+          document.getElementById("after_save_odata_field").value || initialAfterSaveOdata,
+          "— Campo OData a leer —"
+        );
+        status.textContent = data.fields.length + " campos en «" + data.odata_service + "» (paso después de acción).";
       } catch (err) {
         status.textContent = "Error: " + (err.message || String(err));
         status.style.color = "#a80000";
@@ -486,6 +560,9 @@ _EDITOR_PAGE = """
       document.getElementById("odata-status").style.color = "#555";
       loadOdataFields();
     });
+    document.getElementById("load-after-odata-fields").addEventListener("click", () => {
+      loadAfterOdataFields();
+    });
     document.getElementById("type_id").addEventListener("change", syncOdataServiceHint);
     window.addEventListener("load", () => {
       syncOdataServiceHint();
@@ -495,6 +572,10 @@ _EDITOR_PAGE = """
       } else if (document.querySelector('[name="company"]').value.trim()) {
         document.getElementById("odata-status").textContent =
           "Escriba el servicio OData (p. ej. FacturaVenta) y pulse «Cargar campos OData desde BC».";
+      }
+      const afterSvc = document.getElementById("after_odata_service").value.trim();
+      if (document.querySelector('[name="company"]').value.trim() && afterSvc) {
+        loadAfterOdataFields();
       }
     });
   </script>
@@ -523,6 +604,12 @@ _DEFAULT_FORM = {
     "conn_odata_base_url": "",
     "conn_web_base_url": "",
     "conn_company": "",
+    "after_odata_service": "",
+    "after_filter_field": "",
+    "after_filter_value": "{number}",
+    "after_extra_filter_lines": "",
+    "after_save_odata_field": "",
+    "after_save_report_key": "",
 }
 
 _INBOX_PAGE = """
@@ -784,7 +871,37 @@ def _form_from_skill(skill: WorkerSkill) -> dict[str, object]:
             skill.connection.company if skill.connection else ""
         ) or "",
         **_posting_date_form_fields(spec),
+        **_after_action_form_fields(spec),
     }
+
+
+def _after_action_form_fields(spec: object) -> dict[str, str]:
+    empty = {
+        "after_odata_service": "",
+        "after_filter_field": "",
+        "after_filter_value": "{number}",
+        "after_extra_filter_lines": "",
+        "after_save_odata_field": "",
+        "after_save_report_key": "",
+    }
+    steps = getattr(spec, "after_action_steps", ()) or ()
+    if not steps:
+        return empty
+    step = steps[0]
+    payload = {
+        "after_odata_service": step.service,
+        "after_filter_field": step.filter_field,
+        "after_filter_value": step.filter_value,
+        "after_extra_filter_lines": extra_odata_filters_to_lines(
+            dict(step.extra_filters)
+        ),
+        "after_save_odata_field": "",
+        "after_save_report_key": "",
+    }
+    if step.save_for_report:
+        payload["after_save_odata_field"] = step.save_for_report.odata_field
+        payload["after_save_report_key"] = step.save_for_report.report_key
+    return payload
 
 
 def _posting_date_form_fields(spec: object) -> dict[str, str]:

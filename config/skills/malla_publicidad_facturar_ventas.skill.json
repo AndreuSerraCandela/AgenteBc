@@ -2,25 +2,42 @@
   "schema_version": 1,
   "id": "malla_publicidad_facturar_ventas",
   "label": "Facturar ventas Malla Publicidad",
-  "description": "Registra facturas de venta de Malla Publicidad con «Esperar Orden Cliente» = No. Fecha registro: del 1 del mes hasta hoy (cambiar a current_month en el editor si debe ir hasta fin de mes). Informe: nº documento y nº contrato. Ajuste esperarOrdenCliente/contractNo si OData usa otros nombres.",
+  "description": "FacturaVenta + registrar; después de acción OData FacturasRegistradas (Pre_Assigned_No). Informe con nº registrada.",
   "spec": {
     "company": "Malla Publicidad",
     "type_id": "sales_invoice",
     "action_id": "registrar_factura",
     "date_filter": {
-      "field": "posting_date",
-      "dynamic": "month_to_today"
+      "field": "Posting_Date",
+      "dynamic": "current_month"
     },
     "extra_odata_filters": {
-      "esperarOrdenCliente": false
+      "Esperar_Orden_Cliente": "No",
+      "Estado_Contrato": "Firmado",
+      "Document_Type": "Invoice"
     },
-    "limit": 500,
+    "odata_service": "FacturaVenta",
+    "odata_key_field": "No",
+    "limit": 10,
     "dry_run": true,
     "on_error": "report_and_continue",
     "before_action_field_edits": [
       {
         "field_label": "Fecha registro",
         "value": "today"
+      }
+    ],
+    "after_action_steps": [
+      {
+        "kind": "odata_query",
+        "service": "FacturasRegistradas",
+        "filter_field": "Pre_Assigned_No",
+        "filter_value": "{number}",
+        "expect": "at_least_one_row",
+        "save_for_report": {
+          "odata_field": "No",
+          "report_key": "no_factura_registrada"
+        }
       }
     ]
   },
@@ -29,12 +46,17 @@
       {
         "key": "number",
         "label": "Nº documento",
-        "odata": "number"
+        "odata": "No"
       },
       {
-        "key": "contract",
-        "label": "Nº contrato",
-        "odata": "contractNo"
+        "key": "n_x00ba__contrato",
+        "label": "Nº Contrato",
+        "odata": "N_x00BA__Contrato"
+      },
+      {
+        "key": "no_factura_registrada",
+        "label": "Nº factura registrada",
+        "odata": null
       }
     ],
     "notify_emails": [

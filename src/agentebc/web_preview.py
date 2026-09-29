@@ -135,6 +135,7 @@ class BusinessCentralWebPreview:
         )
         self._on_prompt = on_prompt
         self._company_web_param_cache: dict[str, str] = {}
+        self._captured_orphan_dialog_messages: list[PreviewMessage] = []
 
     def _set_prompt(self, text: str | None, *, asking: bool = False) -> None:
         if self._on_prompt is None:
@@ -157,6 +158,7 @@ class BusinessCentralWebPreview:
                 f"La acción {action.label} está bloqueada hasta revisarla"
             )
         self._reports_dir.mkdir(parents=True, exist_ok=True)
+        self._captured_orphan_dialog_messages = []
         url = self._document_url(document, definition)
         logger.info("Abriendo ficha BC: %s", url)
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -280,8 +282,19 @@ class BusinessCentralWebPreview:
                     raise PreviewActionStalledError(
                         "No apareció el cuadro de confirmación de factura registrada."
                     )
+                late_bc = self._peek_bc_message_dialog(
+                    page,
+                    action,
+                    dialog_progress,
+                )
+                messages = (
+                    wait_result.messages
+                    + row_messages
+                    + tuple(self._captured_orphan_dialog_messages)
+                )
+                if late_bc is not None:
+                    messages = messages + (late_bc,)
                 self._dismiss_bc_message_dialogs(page)
-                messages = wait_result.messages + row_messages
                 if messages:
                     outcome = "errors"
                 elif wait_result.outcome == "pending_confirmation":
@@ -1745,9 +1758,6 @@ class BusinessCentralWebPreview:
         action: ActionDefinition,
         dialog_progress: set[int],
     ) -> PreviewMessage | None:
-        if action.auto_confirm and len(dialog_progress) < len(action.dialog_steps):
-            if not self._posting_error_visible(page):
-                return None
         for frame in page.frames:
             try:
                 dialogs = frame.locator('[role="dialog"]')
@@ -1946,6 +1956,17 @@ class BusinessCentralWebPreview:
                 )
                 if not dialogs.count():
                     continue
+                for index in range(dialogs.count()):
+                    dialog = dialogs.nth(index)
+                    try:
+                        if not dialog.is_visible():
+                            continue
+                    except Exception:
+                        continue
+                    text = dialog.inner_text(timeout=800)
+                    if _is_error_messages_page(text):
+                        continue
+                    self._remember_orphan_bc_dialog(frame, dialog, text)
                 for button_label in ("Aceptar", "OK"):
                     button = self._dialog_button_locator(frame, button_label)
                     if button is not None:
@@ -1954,6 +1975,39 @@ class BusinessCentralWebPreview:
             except Exception:
                 continue
         return False
+
+    def _remember_orphan_bc_dialog(
+        self,
+        frame: Frame,
+        dialog: Locator,
+        dialog_text: str,
+    ) -> None:
+        if _confirmation_visible(dialog_text, _POSTING_DATE_CHANGE_NOTICE_MARKERS):
+            return
+        message, call_stack, details = self._read_bc_message_dialog(
+            frame,
+            dialog,
+        )
+        if message is None:
+            message = _extract_bc_dialog_message(dialog_text)
+        if not message:
+            return
+        folded = _fold_dialog_text(message)
+        if "¿desea" in folded or folded.startswith("¿"):
+            return
+        candidate = PreviewMessage(
+            message_type="Error",
+            description=message,
+            context="Diálogo BC",
+            context_field=None,
+            source=None,
+            source_field=None,
+            additional_information=details,
+            call_stack=call_stack,
+        )
+        if any(item.description == candidate.description for item in self._captured_orphan_dialog_messages):
+            return
+        self._captured_orphan_dialog_messages.append(candidate)
 
     def _dismiss_error_messages_surface(self, page: Page) -> bool:
         for frame in page.frames:

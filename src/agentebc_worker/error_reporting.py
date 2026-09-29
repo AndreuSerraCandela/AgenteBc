@@ -41,29 +41,17 @@ def error_detail_from_exception(message: str, *, web_outcome: str | None = None)
 
 
 def format_error_detail_text(detail: dict[str, Any] | None) -> str:
+    """Texto enriquecido para IA (pila, contexto). No va al informe/correo al usuario."""
     if not detail:
         return ""
     lines: list[str] = []
-    outcome = detail.get("web_outcome")
-    if outcome:
-        lines.append(f"Resultado acción web: {outcome}")
-    title = detail.get("title")
-    if title:
-        lines.append(f"Título ficha: {title}")
     messages = detail.get("messages") or []
     if messages:
-        lines.append("")
         lines.append("Mensajes de error (BC):")
         for index, raw in enumerate(messages, start=1):
             if not isinstance(raw, dict):
                 continue
             lines.extend(_format_message_lines(raw, index))
-    raw_rows = detail.get("raw_rows") or []
-    if raw_rows:
-        lines.append("")
-        lines.append("Filas crudas del cuadro de errores BC:")
-        for row in raw_rows:
-            lines.append(f"  {row}")
     screenshot = detail.get("screenshot_path")
     if screenshot:
         lines.append("")

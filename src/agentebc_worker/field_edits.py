@@ -77,7 +77,7 @@ def describe_before_action_edits(spec: WorkerJobSpec) -> str:
     if not spec.before_action_field_edits:
         return ""
     parts = [f"{step.field_label} → {step.value}" for step in spec.before_action_field_edits]
-    return "Edición en ficha antes de registrar: " + "; ".join(parts)
+    return "Edición en ficha antes de la acción: " + "; ".join(parts)
 
 
 def materialize_action_for_job(

@@ -32,7 +32,8 @@ def test_format_error_detail_includes_stack_and_rows() -> None:
     assert "Dimensión obligatoria" in text
     assert "Pila de llamadas" in text
     assert "Codeunit 80" in text
-    assert "Col1|Col2" in text
+    assert "Col1|Col2" not in text
+    assert "Resultado acción web" not in text
     assert "x.png" in text
 
 
@@ -86,3 +87,6 @@ def test_plain_text_report_sections_and_ai_per_invoice() -> None:
     assert "Dimensión obligatoria" in text
     assert "Revisar dimensión PRINCIPAL" in text
     assert "Registro correcto." not in text
+    assert "Detalle completo del error" not in text
+    assert "Filas crudas" not in text
+    assert "Mensajes de error (BC)" not in text

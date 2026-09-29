@@ -5,6 +5,7 @@ from agentebc.bc_client import BusinessCentralReadClient
 from agentebc.document_types import DocumentTypeDefinition
 from agentebc.documents import bc_urlencode, _odata_literal
 
+from .after_action import evaluate_after_action_steps
 from .job_spec import (
     WorkerJobSpec,
     resolve_odata_key_field,
@@ -12,7 +13,6 @@ from .job_spec import (
     uses_custom_odata_service,
 )
 from .list_documents import (
-    _ODATA_POSTING_NO_FIELD,
     _row_still_open_for_posting,
     document_still_listed_for_job,
 )
@@ -42,7 +42,6 @@ def document_still_open_by_number(
         {
             "company": company,
             "$filter": f"{key_field} eq {_odata_literal(number)}",
-            "$select": f"{key_field},{_ODATA_POSTING_NO_FIELD}",
             "$top": "1",
         }
     )
@@ -56,15 +55,25 @@ def document_still_open_by_number(
     return _row_still_open_for_posting(row)
 
 
-def is_registered_for_posting_job(
+def registration_check_for_posting_job(
     client: BusinessCentralReadClient,
     definition: DocumentTypeDefinition,
     spec: WorkerJobSpec,
     number: str,
-) -> bool:
-    """True si BC ya no tiene el documento como pendiente de registro."""
+) -> tuple[bool, dict[str, str]]:
+    """(registrada, campos extra para informe desde pasos después de acción)."""
     if document_still_listed_for_job(client, definition, spec, number):
-        return False
+        return False, {}
+    after = evaluate_after_action_steps(
+        client,
+        company=spec.company,
+        steps=spec.after_action_steps,
+        number=number,
+    )
+    if after.used_after_steps:
+        return after.registered, dict(after.fields)
+    if uses_custom_odata_service(spec, definition):
+        return True, {}
     service = resolve_odata_service(spec, definition)
     key_field = resolve_odata_key_field(spec, definition)
     if document_still_open_by_number(
@@ -74,5 +83,20 @@ def is_registered_for_posting_job(
         number,
         key_field=key_field,
     ):
-        return False
-    return True
+        return False, {}
+    return True, {}
+
+
+def is_registered_for_posting_job(
+    client: BusinessCentralReadClient,
+    definition: DocumentTypeDefinition,
+    spec: WorkerJobSpec,
+    number: str,
+) -> bool:
+    registered, _ = registration_check_for_posting_job(
+        client,
+        definition,
+        spec,
+        number,
+    )
+    return registered

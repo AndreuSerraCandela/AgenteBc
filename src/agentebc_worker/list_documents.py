@@ -191,10 +191,30 @@ def document_still_listed_for_job(
     return True
 
 
+_POSTING_NO_FIELD_ALIASES = (
+    _ODATA_POSTING_NO_FIELD,
+    "Posted_No",
+    "No_Factura_Registrada",
+    "PostedInvoiceNo",
+)
+
+
+def _posting_number_from_row(row: dict[str, object]) -> str:
+    for field in _POSTING_NO_FIELD_ALIASES:
+        if field not in row:
+            continue
+        value = str(row.get(field, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _row_still_open_for_posting(row: dict[str, object]) -> bool:
     """Comprobación OData tras registrar: sigue en el servicio sin nº registro."""
-    posting_no = str(row.get(_ODATA_POSTING_NO_FIELD, "") or "").strip()
-    if posting_no:
+    if _posting_number_from_row(row):
+        return False
+    status = str(row.get(_ODATA_POSTING_STATUS_FIELD, "") or "").strip()
+    if status and status.casefold() in {"posted", "registrado", "closed"}:
         return False
     return True
 

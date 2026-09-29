@@ -4,11 +4,13 @@ from dataclasses import replace
 
 from agentebc.config import Settings
 from agentebc_worker.job_spec import WorkerJobSpec
+from agentebc_worker.field_edits import spec_with_posting_date_mode
 from agentebc_worker.skill_connection import (
     SkillConnection,
     resolve_skill_company,
     settings_for_skill,
 )
+from agentebc_worker.simple_portal import _posting_field_label
 from agentebc_worker.skills import SkillReport, WorkerSkill
 
 
@@ -35,6 +37,30 @@ def _skill(*, company: str = "", conn_company: str = "") -> WorkerSkill:
 def test_resolve_skill_company_override() -> None:
     skill = _skill(company="A")
     assert resolve_skill_company(skill, override="B") == "B"
+
+
+def test_portal_posting_date_mode_today() -> None:
+    skill = _skill(company="A")
+    spec = spec_with_posting_date_mode(skill.to_job_spec(dry_run=True), "today")
+    assert spec.before_action_field_edits[0].value == "today"
+
+
+def test_posting_field_label_from_skill() -> None:
+    skill = WorkerSkill.from_dict(
+        {
+            "id": "t",
+            "label": "T",
+            "spec": {
+                "company": "A",
+                "type_id": "sales_invoice",
+                "action_id": "registrar_factura",
+                "before_action_field_edits": [
+                    {"field_label": "Fecha registro", "value": "today"}
+                ],
+            },
+        }
+    )
+    assert _posting_field_label(skill) == "Fecha registro"
 
 
 def test_resolve_skill_company_from_connection() -> None:

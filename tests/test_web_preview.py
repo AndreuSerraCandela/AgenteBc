@@ -63,6 +63,20 @@ def test_matches_dialog_title_ignoring_accents_and_loose_token() -> None:
     )
 
 
+def test_extracts_reservation_project_dialog_text() -> None:
+    dialog = (
+        "No hay reservas en el proyecto PR25-M1982 de la empresa Malla Publicidad.\n"
+        "Compartir detalles\n"
+        "¿Le resultó útil esta información?\n"
+        "Sí\nNo\n"
+        "Aceptar"
+    )
+    message = _extract_bc_dialog_message(dialog)
+    assert message == (
+        "No hay reservas en el proyecto PR25-M1982 de la empresa Malla Publicidad."
+    )
+
+
 def test_extracts_business_central_message_dialog_text() -> None:
     dialog = (
         "Ya se han creado los borradores de facturas de este contrato.\n"

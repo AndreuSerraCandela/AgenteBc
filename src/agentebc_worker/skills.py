@@ -11,6 +11,7 @@ from agentebc.document_types import FieldEditStep
 
 from .field_edits import DEFAULT_POSTING_DATE_FIELD_LABEL
 from .skill_connection import SkillConnection
+from .after_action import validate_save_for_report_keys
 from .job_spec import (
     WorkerJobSpec,
     extra_odata_filters_to_lines,
@@ -33,7 +34,11 @@ class SkillReportField:
     def from_dict(cls, value: dict[str, Any]) -> SkillReportField:
         key = str(value.get("key", "")).strip()
         label = str(value.get("label", "")).strip() or key
-        odata = str(value.get("odata", "")).strip() or None
+        raw_odata = value.get("odata")
+        if raw_odata is None or raw_odata == "":
+            odata = None
+        else:
+            odata = str(raw_odata).strip() or None
         if not key and odata:
             key = odata
         if not key:
@@ -131,12 +136,15 @@ class WorkerSkill:
         return WorkerJobSpec.from_dict(data)
 
     def report_odata_fields(self) -> dict[str, str]:
+        """Solo campos OData del listado del job; columnas solo-informe (odata vacío) se excluyen."""
         mapping: dict[str, str] = {}
         key_override = (self.spec.odata_key_field or "").strip()
         for item in self.report.fields:
-            odata = (item.odata or item.key).strip()
-            if item.key == "number" and key_override:
-                odata = key_override
+            if item.key == "number":
+                odata = key_override or (item.odata or "").strip() or "number"
+                mapping["number"] = odata
+                continue
+            odata = (item.odata or "").strip()
             if odata:
                 mapping[item.key] = odata
         return mapping
@@ -238,8 +246,10 @@ def report_fields_to_lines(fields: tuple[SkillReportField, ...]) -> str:
     for item in fields:
         if item.key == "number":
             continue
-        odata = item.odata or item.key
-        lines.append(f"{item.label} | {item.key} | {odata}")
+        if item.odata:
+            lines.append(f"{item.label} | {item.key} | {item.odata}")
+        else:
+            lines.append(f"{item.label} | {item.key} |")
     return "\n".join(lines)
 
 
@@ -272,14 +282,14 @@ def parse_report_fields_lines(
             key = _report_key_from_odata(odata)
             fields.append(SkillReportField(key=key, label=label or key, odata=odata))
             continue
-        label, key, odata = parts[0], parts[1], parts[2]
-        if not odata:
-            continue
+        label, key, odata = parts[0], parts[1], parts[2].strip()
+        if not key:
+            key = _report_key_from_odata(odata or label)
         fields.append(
             SkillReportField(
-                key=key or _report_key_from_odata(odata),
-                label=label or key or odata,
-                odata=odata,
+                key=key,
+                label=label or key,
+                odata=odata or None,
             )
         )
     return tuple(fields)
@@ -315,6 +325,12 @@ def skill_from_builder_form(form: object) -> WorkerSkill:
     description = _form_str(form, "description")
     posting_date_before_register = _form_str(form, "posting_date_before_register")
     before_action_field_edits_lines = _form_str(form, "before_action_field_edits_lines")
+    after_service = _form_str(form, "after_odata_service")
+    after_field = _form_str(form, "after_filter_field")
+    after_value = _form_str(form, "after_filter_value") or "{number}"
+    after_extra_lines = _form_str(form, "after_extra_filter_lines")
+    after_save_odata_field = _form_str(form, "after_save_odata_field")
+    after_save_report_key = _form_str(form, "after_save_report_key")
 
     extra = parse_extra_odata_filter_lines(
         extra_filter_lines,
@@ -362,7 +378,43 @@ def skill_from_builder_form(form: object) -> WorkerSkill:
         extra_columns=(),
         advanced_lines=report_fields_lines,
     )
+    after_svc = after_service.strip()
+    after_fld = after_field.strip()
+    if after_svc or after_fld:
+        if not after_svc or not after_fld:
+            raise ValueError(
+                "Después de acción (OData): indique servicio y campo de filtro, "
+                "o deje ambos vacíos"
+            )
+        after_extra = parse_extra_odata_filter_lines(
+            after_extra_lines,
+            field_types=field_types,
+        )
+        step: dict[str, Any] = {
+            "kind": "odata_query",
+            "service": after_svc,
+            "filter_field": after_fld,
+            "filter_value": after_value.strip() or "{number}",
+            "expect": "at_least_one_row",
+        }
+        if after_extra:
+            step["extra_filters"] = after_extra
+        save_odata = after_save_odata_field.strip()
+        save_key = after_save_report_key.strip()
+        if save_odata or save_key:
+            if not save_odata or not save_key:
+                raise ValueError(
+                    "Para guardar en informe indique campo OData del paso y "
+                    "clave de columna del informe"
+                )
+            step["save_for_report"] = {
+                "odata_field": save_odata,
+                "report_key": save_key,
+            }
+        spec_payload["after_action_steps"] = [step]
     spec = WorkerJobSpec.from_dict(spec_payload, require_company=False)
+    report_keys = frozenset(field.key for field in report_fields)
+    validate_save_for_report_keys(spec.after_action_steps, report_keys)
     conn_payload: dict[str, str] = {}
     odata_url = _form_str(form, "conn_odata_base_url")
     web_url = _form_str(form, "conn_web_base_url")

@@ -11,6 +11,10 @@ from agentebc.document_types import (
     RUNNABLE_SAFETY_LEVELS,
 )
 
+from .after_action import (
+    AfterActionOdataQueryStep,
+    after_action_steps_from_spec_payload,
+)
 from .dynamic_filters import DYNAMIC_FILTER_IDS, resolve_dynamic_filter
 
 
@@ -69,6 +73,7 @@ class WorkerJobSpec:
     dry_run: bool = True
     on_error: str = "report_and_continue"
     before_action_field_edits: tuple[FieldEditStep, ...] = ()
+    after_action_steps: tuple[AfterActionOdataQueryStep, ...] = ()
 
     @classmethod
     def from_dict(
@@ -122,6 +127,7 @@ class WorkerJobSpec:
             dry_run=bool(value.get("dry_run", True)),
             on_error=on_error,
             before_action_field_edits=before_edits,
+            after_action_steps=after_action_steps_from_spec_payload(value),
         )
         return spec
 
@@ -143,6 +149,10 @@ class WorkerJobSpec:
             {"field_label": step.field_label, "value": step.value}
             for step in self.before_action_field_edits
         ]
+        payload["after_action_steps"] = [
+            step.as_dict() for step in self.after_action_steps
+        ]
+        payload.pop("odata_confirmation", None)
         return payload
 
     def validate_against_registry(self, registry: DocumentTypeRegistry) -> None:

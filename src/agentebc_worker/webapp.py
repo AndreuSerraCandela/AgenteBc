@@ -72,7 +72,7 @@ _PAGE = """
       </select>
       <label>Empresa <span class="hint" style="font-weight:normal;">(si el skill no la trae)</span></label>
       <input name="company_override" placeholder="Opcional">
-      <label><strong>Antes de registrar:</strong> Fecha registro en ficha BC</label>
+      <label><strong>Antes de acción:</strong> Fecha registro en ficha BC</label>
       <select name="posting_date_before_register">
         <option value="">Usar lo guardado en el skill</option>
         <option value="today">Poner fecha de hoy</option>

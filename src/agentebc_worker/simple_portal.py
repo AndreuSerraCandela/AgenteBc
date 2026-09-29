@@ -10,6 +10,11 @@ from agentebc.bc_client import BusinessCentralReadClient
 from agentebc.config import Settings
 from agentebc.document_types import DocumentTypeRegistry
 
+from .field_edits import (
+    DEFAULT_POSTING_DATE_FIELD_LABEL,
+    describe_before_action_edits,
+    spec_with_posting_date_mode,
+)
 from .job_spec import WorkerJobSpec
 from .paths import WorkerPaths
 from .pending import write_pending_preview
@@ -62,6 +67,16 @@ _PORTAL_PAGE = """
       <span class="hint" id="company-hint"></span>
     </label>
     <input name="company" id="company" value="{{ form.company }}" placeholder="Nombre en BC">
+
+    <label id="posting-label">{{ posting_field_label }}
+      <span class="hint">(en la ficha BC, antes de registrar)</span>
+    </label>
+    <select name="posting_date_before_register" id="posting_date">
+      <option value="today" {% if form.posting_date == 'today' %}selected{% endif %}>Poner fecha de hoy</option>
+      <option value="end_of_month" {% if form.posting_date == 'end_of_month' %}selected{% endif %}>Poner fin de mes en curso</option>
+      <option value="skill" {% if form.posting_date == 'skill' %}selected{% endif %}>Usar lo definido en el skill</option>
+      <option value="none" {% if form.posting_date == 'none' %}selected{% endif %}>No cambiar la fecha</option>
+    </select>
 
     <button type="submit" id="go">Ejecutar registro</button>
   </form>
@@ -116,7 +131,8 @@ def register_simple_portal_routes(
     def portal_home():
         return _render_portal(
             skill_store(),
-            form={"skill_id": "", "company": ""},
+            form={"skill_id": "", "company": "", "posting_date": "today"},
+            posting_field_label=DEFAULT_POSTING_DATE_FIELD_LABEL,
             error=None,
             summary=None,
             report_text=None,
@@ -130,9 +146,16 @@ def register_simple_portal_routes(
         report_text = None
         skill_id = request.form.get("skill_id", "").strip()
         company_input = request.form.get("company", "").strip()
-        form = {"skill_id": skill_id, "company": company_input}
+        posting_mode = request.form.get("posting_date_before_register", "today").strip()
+        form = {
+            "skill_id": skill_id,
+            "company": company_input,
+            "posting_date": posting_mode or "today",
+        }
+        posting_label = DEFAULT_POSTING_DATE_FIELD_LABEL
         try:
             skill = skill_store().get(skill_id)
+            posting_label = _posting_field_label(skill)
             company = resolve_skill_company(skill, override=company_input)
             if not company:
                 raise ValueError(
@@ -142,10 +165,20 @@ def register_simple_portal_routes(
             spec = WorkerJobSpec.from_dict(
                 {**skill.to_job_spec(dry_run=False).as_dict(), "company": company}
             )
+            apply_mode = posting_mode if posting_mode != "skill" else ""
+            spec = spec_with_posting_date_mode(spec, apply_mode)
             reg = registry()
             spec.validate_against_registry(reg)
             client = BusinessCentralReadClient(settings)
             preview = build_job_preview(reg, spec, client=client)
+            edit_note = describe_before_action_edits(spec)
+            if edit_note:
+                from dataclasses import replace
+
+                preview = replace(
+                    preview,
+                    summary=preview.summary + "\n" + edit_note,
+                )
             payload = preview.as_dict()
             payload["skill_id"] = skill.id
             write_pending_preview(worker_paths.pending_preview_file, payload)
@@ -178,6 +211,7 @@ def register_simple_portal_routes(
             summary=summary,
             report_text=report_text,
             inbox_count=_inbox_count(inbox_count_fn),
+            posting_field_label=posting_label if skill_id else DEFAULT_POSTING_DATE_FIELD_LABEL,
         )
 
 
@@ -189,6 +223,7 @@ def _render_portal(
     summary: str | None,
     report_text: str | None,
     inbox_count: int,
+    posting_field_label: str = DEFAULT_POSTING_DATE_FIELD_LABEL,
 ):
     skills_view = []
     for skill in store.all():
@@ -204,7 +239,15 @@ def _render_portal(
         summary=summary,
         report_text=report_text,
         inbox_count=inbox_count,
+        posting_field_label=posting_field_label,
     )
+
+
+def _posting_field_label(skill) -> str:
+    for step in skill.spec.before_action_field_edits:
+        if step.field_label.strip():
+            return step.field_label.strip()
+    return DEFAULT_POSTING_DATE_FIELD_LABEL
 
 
 def _run_line(result) -> str:

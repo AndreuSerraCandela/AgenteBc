@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from agentebc.bc_client import BusinessCentralReadClient
@@ -21,7 +21,11 @@ from .error_reporting import error_detail_from_exception, error_detail_from_prev
 
 from .job_spec import WorkerJobSpec, uses_custom_odata_service
 from .list_documents import document_still_listed_for_job, list_documents_for_job
-from .odata_posting import is_registered_for_posting_job, posting_action_requires_odata_check
+from .odata_posting import (
+    is_registered_for_posting_job,
+    posting_action_requires_odata_check,
+    registration_check_for_posting_job,
+)
 from .field_edits import materialize_action_for_job
 from .preview import build_job_preview
 
@@ -344,17 +348,24 @@ def _reconcile_outcomes_with_odata(
 ) -> list[DocumentRunOutcome]:
     reconciled: list[DocumentRunOutcome] = []
     for item in outcomes:
-        registered = is_registered_for_posting_job(
+        registered, after_fields = registration_check_for_posting_job(
             client,
             definition,
             spec,
             item.number,
         )
+        merged_fields = dict(item.fields)
+        if registered and after_fields:
+            merged_fields.update(after_fields)
         if item.outcome == "success":
             if registered:
-                reconciled.append(item)
+                reconciled.append(
+                    replace(item, fields=merged_fields)
+                    if after_fields
+                    else item
+                )
                 continue
-            msg = "Comprobación OData: sigue sin Posting_No tras registrar."
+            msg = "Comprobación OData: el paso después de acción no confirmó el registro."
             reconciled.append(
                 DocumentRunOutcome(
                     number=item.number,
@@ -372,7 +383,7 @@ def _reconcile_outcomes_with_odata(
                     number=item.number,
                     outcome="success",
                     error=None,
-                    fields=item.fields,
+                    fields=merged_fields,
                     attempts=item.attempts,
                 )
             )

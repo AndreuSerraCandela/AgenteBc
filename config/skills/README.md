@@ -41,6 +41,12 @@ Con un **servicio OData distinto** al del catálogo (p. ej. `FacturaVenta`):
   del informe** desde la lista OData cargada.
 - **Filtros extra:** varias líneas `campo | valor`. En campos texto BC (Sí/No)
   use `No`, no `false`. Booleanos OData reales: `false`/`true` o `bool:false`.
+- **Después de acción (opcional):** pasos tras la acción principal. Hoy: consulta
+  OData (`after_action_steps` con `kind: odata_query`, `expect: at_least_one_row`).
+  Filtro con `{number}` = nº del documento. Para volcar un valor al informe, defina
+  la columna en el informe (`etiqueta | clave |` OData vacío) y en el paso
+  `save_for_report: { odata_field, report_key }` (la clave debe existir en el informe).
+  Skills antiguos con `odata_confirmation` se migran al cargar.
 - **Informe:** igual que filtros — elija campo OData, título y «Añadir columna»;
   las líneas activas son editables (`etiqueta | clave | campo OData`).
 

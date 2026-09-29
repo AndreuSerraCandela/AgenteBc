@@ -6,7 +6,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .error_reporting import format_error_detail_text
 from .runner import BatchRunResult, DocumentRunOutcome
 from .skills import SkillReportField, WorkerSkill
 
@@ -162,11 +161,6 @@ def format_report_plain_text(report: SkillBatchReport) -> str:
             lines.extend(_format_row_header(row, report))
             if row.get("error"):
                 lines.append(f"Resumen: {row['error']}")
-            detail_text = format_error_detail_text(row.get("error_detail"))
-            if detail_text:
-                lines.append("")
-                lines.append("Detalle completo del error (BC):")
-                lines.append(detail_text)
             lines.append("")
     else:
         lines.append("No hay errores de registro en este lote.")
