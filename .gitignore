@@ -12,6 +12,9 @@ reports/
 logs/
 .cache/
 *.log
+# PyInstaller + Inno (AgenteBc desktop y Worker)
+dist/
+build/
 packaging/actions/
 packaging/Output/
 packaging/releases/*.exe
