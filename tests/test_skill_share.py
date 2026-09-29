@@ -32,3 +32,26 @@ def test_skill_share_roundtrip(tmp_path) -> None:
     assert pending[0].skill["id"] == "demo"
     store.close(item.id)
     assert store.list_pending() == ()
+
+
+def test_create_app_loads_share_env_from_env_file(
+    tmp_path, monkeypatch
+) -> None:
+    env = tmp_path / ".env"
+    env.write_text(
+        "AGENTEBC_SHARE_TOKEN=unit-test-token\n"
+        "AGENTEBC_SHARE_URL=https://agentebc.example.test\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENTEBC_ENV_FILE", str(env))
+    monkeypatch.delenv("AGENTEBC_SHARE_TOKEN", raising=False)
+    monkeypatch.delenv("AGENTEBC_SHARE_URL", raising=False)
+
+    import agentebc_worker.skill_share as mod
+
+    mod._share_env_loaded = False
+    from agentebc_worker.webapp import create_app
+    from agentebc_worker.skill_share import share_portal_configured
+
+    create_app()
+    assert share_portal_configured() is True

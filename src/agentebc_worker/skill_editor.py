@@ -625,6 +625,11 @@ _INBOX_PAGE = """
 <p style="background:#fff8e6;padding:10px;border-left:4px solid #c19c00;">
   Falta <code>AGENTEBC_SHARE_URL</code> y <code>AGENTEBC_SHARE_TOKEN</code> en
   <code>%LOCALAPPDATA%\\AgenteBC\\.env</code> (mismo token que en el servidor).
+  Reinicie el Worker tras editar el .env.
+</p>
+{% elif portal_error %}
+<p style="background:#fff1f0;padding:10px;border-left:4px solid #a80000;">
+  No se pudo leer el buzón del portal: {{ portal_error }}
 </p>
 {% endif %}
 <ul style="list-style:none;padding:0;">
@@ -746,19 +751,19 @@ def register_skill_routes(
         from .skill_share import (
             list_pending_from_portal,
             merge_pending_skills,
+            portal_inbox_fetch_error,
             share_portal_configured,
         )
 
-        pending = merge_pending_skills(
-            inbox.list_pending(),
-            list_pending_from_portal(),
-        )
+        remote = list_pending_from_portal()
+        pending = merge_pending_skills(inbox.list_pending(), remote)
         return render_template_string(
             _INBOX_PAGE,
             items=pending,
             error=request.args.get("error"),
             saved=request.args.get("saved"),
             share_configured=share_portal_configured(),
+            portal_error=portal_inbox_fetch_error(),
         )
 
     @app.post("/skills/inbox/install")
@@ -790,10 +795,13 @@ def register_skill_routes(
             skill = skill_store().get(skill_id)
             remote = share_skill_via_portal(skill, note=note)
             if remote is not None:
-                saved = f"Portal: {remote.id}"
+                saved = f"Enviado al portal (visible en Skills de otros PCs): {remote.id}"
             else:
                 item = inbox.share(skill, note=note)
-                saved = f"Buzón local: {item.id}"
+                saved = (
+                    f"Buzón local (solo este PC; configure AGENTEBC_SHARE_TOKEN "
+                    f"en %LOCALAPPDATA%\\AgenteBC\\.env): {item.id}"
+                )
             return redirect(
                 url_for(
                     "skill_editor",

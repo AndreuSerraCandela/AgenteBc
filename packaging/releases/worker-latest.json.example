@@ -1,8 +1,8 @@
 {
-  "version": "0.2.9",
+  "version": "0.2.10",
   "product": "worker",
   "min_version": "0.2.0",
-  "download_url": "https://agentebc.malla.es/releases/AgenteBcWorker-0.2.9-setup.exe",
+  "download_url": "https://agentebc.malla.es/releases/AgenteBcWorker-0.2.10-setup.exe",
   "sha256": "reemplazar-con-hash-sha256-del-instalador",
   "release_notes": "Worker: portal de registro, skills y pasos después de acción."
 }

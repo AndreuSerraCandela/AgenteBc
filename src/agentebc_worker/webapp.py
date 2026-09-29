@@ -181,6 +181,10 @@ _PAGE = """
 
 
 def create_app() -> Flask:
+    from .skill_share import ensure_share_env_loaded
+
+    ensure_share_env_loaded()
+
     app = Flask(__name__)
     worker_paths = WorkerPaths.resolve()
     worker_paths.ensure_dirs()

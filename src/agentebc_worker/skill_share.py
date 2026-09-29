@@ -14,7 +14,8 @@ from .skills import WorkerSkill
 _SHARE_ID_PATTERN = __import__("re").compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
 )
-_DEFAULT_DIR = Path(__file__).resolve().parents[2] / "data" / "skills-share"
+_share_env_loaded = False
+_last_portal_inbox_error: str | None = None
 
 
 class SkillShareError(ValueError):
@@ -165,14 +166,29 @@ class SkillShareStore:
         temporary.replace(path)
 
 
+def ensure_share_env_loaded() -> None:
+    """Carga %LOCALAPPDATA%\\AgenteBC\\.env (AGENTEBC_ENV_FILE) en os.environ."""
+    global _share_env_loaded
+    if _share_env_loaded:
+        return
+    from agentebc.config import Settings
+
+    Settings._load_all_env_files(override=False)
+    _share_env_loaded = True
+
+
 def skills_share_dir() -> Path:
+    ensure_share_env_loaded()
     configured = os.getenv("AGENTEBC_WORKER_SKILLS_SHARE_DIR", "").strip()
     if configured:
         return Path(configured).expanduser().resolve()
-    return _DEFAULT_DIR.resolve()
+    from .paths import WorkerPaths
+
+    return WorkerPaths.resolve().worker_dir / "skills-share"
 
 
 def portal_base_url() -> str | None:
+    ensure_share_env_loaded()
     url = (
         os.getenv("AGENTEBC_SHARE_URL", "").strip()
         or os.getenv("AGENTEBC_PORTAL_URL", "").strip()
@@ -181,7 +197,13 @@ def portal_base_url() -> str | None:
 
 
 def _portal_share_token() -> str:
+    ensure_share_env_loaded()
     return os.getenv("AGENTEBC_SHARE_TOKEN", "").strip()
+
+
+def portal_inbox_fetch_error() -> str | None:
+    """Último error al consultar /api/skills/inbox (p. ej. token incorrecto)."""
+    return _last_portal_inbox_error
 
 
 def share_portal_configured() -> bool:
@@ -236,6 +258,9 @@ def list_pending_from_portal() -> tuple[SharedSkill, ...]:
     import urllib.error
     import urllib.request
 
+    global _last_portal_inbox_error
+    _last_portal_inbox_error = None
+
     base = portal_base_url()
     token = _portal_share_token()
     if not base or not token:
@@ -251,7 +276,15 @@ def list_pending_from_portal() -> tuple[SharedSkill, ...]:
     try:
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        _last_portal_inbox_error = (
+            f"El portal respondió {exc.code}"
+            + (f": {detail}" if detail else "")
+        )
+        return ()
+    except (urllib.error.URLError, json.JSONDecodeError) as exc:
+        _last_portal_inbox_error = str(exc)
         return ()
     if not isinstance(payload, dict):
         return ()

@@ -2,7 +2,7 @@
 ; Compilar tras: scripts\build-worker.ps1
 
 #define MyAppName "AgenteBc Worker"
-#define MyAppVersion "0.2.9"
+#define MyAppVersion "0.2.10"
 #define MyAppPublisher "Malla Publicidad"
 #define MyAppURL "https://agentebc.malla.es"
 #define MyAppExeName "AgenteBcWorker.exe"
