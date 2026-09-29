@@ -78,6 +78,8 @@ agentebc-desktop
 Build del instalador Windows, actualizaciones y despliegue IIS del portal en
 `docs/DESKTOP.md` (`web.config`, `install_web_iis.bat`).
 
+Worker (registro en lote, portal `/portal`, skills): `docs/WORKER.md`.
+
 ## Configuración
 
 Las credenciales no se guardan en el repositorio. La aplicación carga el

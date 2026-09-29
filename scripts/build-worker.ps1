@@ -21,6 +21,7 @@ $isccCandidates = @(
     "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 )
 $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+$issPath = Join-Path $Root "packaging\agentebc-worker.iss"
 if ($iscc) {
     Write-Host "Compilando instalador Worker con Inno Setup..."
     & $iscc $issPath
