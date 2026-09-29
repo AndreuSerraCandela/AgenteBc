@@ -744,12 +744,17 @@ def register_skill_routes(
 
     @app.post("/skills/inbox/install")
     def skill_inbox_install():
+        from .skill_share import close_shared_skill_on_portal, resolve_shared_skill
+
         share_id = request.form.get("share_id", "").strip()
         try:
-            item = inbox.get(share_id)
+            item, from_portal = resolve_shared_skill(share_id, inbox)
             skill = WorkerSkill.from_dict(item.skill)
             path = skill_store().save(skill)
-            inbox.close(share_id)
+            if from_portal:
+                close_shared_skill_on_portal(share_id)
+            else:
+                inbox.close(share_id)
             return redirect(
                 url_for("skill_editor", skill_id=skill.id, saved=str(path))
             )

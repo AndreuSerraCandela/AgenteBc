@@ -256,3 +256,82 @@ def merge_pending_skills(
             seen.add(item.id)
     merged.sort(key=lambda row: row.created_at, reverse=True)
     return tuple(merged)
+
+
+def merged_pending_count(local_store: SkillShareStore | None = None) -> int:
+    store = local_store or SkillShareStore()
+    return len(
+        merge_pending_skills(store.list_pending(), list_pending_from_portal())
+    )
+
+
+def get_shared_skill_from_portal(share_id: str) -> SharedSkill | None:
+    import json
+    import urllib.error
+    import urllib.request
+
+    if not _SHARE_ID_PATTERN.fullmatch(share_id):
+        return None
+    base = portal_base_url()
+    token = _portal_share_token()
+    if not base or not token:
+        return None
+    request = urllib.request.Request(
+        f"{base}/api/skills/{share_id}",
+        headers={
+            "Accept": "application/json",
+            "X-AgenteBc-Share-Token": token,
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    try:
+        return SharedSkill.from_dict(payload)
+    except (SkillShareError, ValueError):
+        return None
+
+
+def close_shared_skill_on_portal(share_id: str) -> bool:
+    import urllib.error
+    import urllib.request
+
+    if not _SHARE_ID_PATTERN.fullmatch(share_id):
+        return False
+    base = portal_base_url()
+    token = _portal_share_token()
+    if not base or not token:
+        return False
+    request = urllib.request.Request(
+        f"{base}/api/skills/{share_id}/close",
+        data=b"{}",
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "X-AgenteBc-Share-Token": token,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30):
+            return True
+    except (urllib.error.URLError, urllib.error.HTTPError):
+        return False
+
+
+def resolve_shared_skill(
+    share_id: str,
+    local_store: SkillShareStore,
+) -> tuple[SharedSkill, bool]:
+    """Devuelve (item, from_portal)."""
+    try:
+        return local_store.get(share_id), False
+    except KeyError:
+        remote = get_shared_skill_from_portal(share_id)
+        if remote is None:
+            raise KeyError(share_id) from None
+        return remote, True

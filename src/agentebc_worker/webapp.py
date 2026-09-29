@@ -26,7 +26,7 @@ from .pending import (
 from .field_edits import describe_before_action_edits, spec_with_posting_date_mode
 from .runner import run_job
 from .skill_editor import register_skill_routes
-from .skill_share import SkillShareStore
+from .skill_share import SkillShareStore, merged_pending_count
 from .simple_portal import register_simple_portal_routes
 from .skill_connection import settings_for_skill
 from .skill_postrun import finalize_skill_batch, postrun_summary
@@ -205,7 +205,7 @@ def create_app() -> Flask:
         worker_paths=worker_paths,
         registry=registry,
         skill_store=skill_store,
-        inbox_count_fn=lambda: len(share_store.list_pending()),
+        inbox_count_fn=lambda: merged_pending_count(share_store),
     )
 
     @app.get("/")
