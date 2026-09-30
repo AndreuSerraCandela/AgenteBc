@@ -7,6 +7,23 @@ from agentebc_worker.skills import SkillReport, WorkerSkill
 from agentebc_worker.job_spec import WorkerJobSpec
 
 
+def test_skills_share_dir_uses_releases_sibling_on_server(
+    tmp_path, monkeypatch
+) -> None:
+    releases = tmp_path / "data" / "releases"
+    releases.mkdir(parents=True)
+    monkeypatch.delenv("AGENTEBC_WORKER_SKILLS_SHARE_DIR", raising=False)
+    monkeypatch.setenv("AGENTEBC_RELEASES_DIR", str(releases))
+    monkeypatch.setenv("AGENTEBC_APP_MODE", "portal")
+
+    import agentebc_worker.skill_share as mod
+
+    mod._share_env_loaded = True
+    from agentebc_worker.skill_share import skills_share_dir
+
+    assert skills_share_dir() == (tmp_path / "data" / "skills-share").resolve()
+
+
 def test_format_share_timestamp_utc_to_local() -> None:
     text = format_share_timestamp("2026-09-29T11:37:17.519891+00:00")
     assert re.fullmatch(r"29/09/2026 \d{2}:37", text)

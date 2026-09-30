@@ -182,9 +182,16 @@ def skills_share_dir() -> Path:
     configured = os.getenv("AGENTEBC_WORKER_SKILLS_SHARE_DIR", "").strip()
     if configured:
         return Path(configured).expanduser().resolve()
-    from .paths import WorkerPaths
+    from agentebc.paths import development_root, is_desktop_mode
 
-    return WorkerPaths.resolve().worker_dir / "skills-share"
+    if is_desktop_mode():
+        from .paths import WorkerPaths
+
+        return WorkerPaths.resolve().worker_dir / "skills-share"
+    releases = os.getenv("AGENTEBC_RELEASES_DIR", "").strip()
+    if releases:
+        return (Path(releases).expanduser().resolve().parent / "skills-share").resolve()
+    return (development_root() / "data" / "skills-share").resolve()
 
 
 def portal_base_url() -> str | None:
@@ -246,7 +253,19 @@ def share_skill_via_portal(
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
             payload = json.loads(response.read().decode("utf-8"))
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        try:
+            parsed = json.loads(detail)
+            if isinstance(parsed, dict) and parsed.get("error"):
+                detail = str(parsed["error"])
+        except json.JSONDecodeError:
+            pass
+        message = detail or f"HTTP {exc.code}"
+        raise SkillShareError(
+            f"No se pudo publicar el skill en el portal: {message}"
+        ) from exc
+    except (urllib.error.URLError, json.JSONDecodeError) as exc:
         raise SkillShareError(f"No se pudo publicar el skill en el portal: {exc}") from exc
     if not isinstance(payload, dict):
         raise SkillShareError("Respuesta del portal no válida")
