@@ -136,6 +136,10 @@ class BusinessCentralWebPreview:
         self._on_prompt = on_prompt
         self._company_web_param_cache: dict[str, str] = {}
         self._captured_orphan_dialog_messages: list[PreviewMessage] = []
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page: Page | None = None
 
     def _set_prompt(self, text: str | None, *, asking: bool = False) -> None:
         if self._on_prompt is None:
@@ -145,11 +149,78 @@ class BusinessCentralWebPreview:
         except TypeError:
             self._on_prompt(text)
 
+    def close_session(self) -> None:
+        """Cierra navegador y Playwright. Se puede llamar varias veces."""
+        context = self._context
+        browser = self._browser
+        playwright = self._playwright
+        self._page = None
+        self._context = None
+        self._browser = None
+        self._playwright = None
+        for closer in (
+            getattr(context, "close", None),
+            getattr(browser, "close", None),
+            getattr(playwright, "stop", None),
+        ):
+            if closer is None:
+                continue
+            try:
+                closer()
+            except Exception:
+                logger.debug("No se pudo cerrar la sesión web", exc_info=True)
+
+    def _acquire_page(self) -> tuple[Page, object]:
+        if self._page is not None and self._context is not None:
+            try:
+                if not self._page.is_closed():
+                    return self._page, self._context
+            except Exception:
+                logger.debug("La página reutilizada no responde", exc_info=True)
+            self.close_session()
+        playwright = sync_playwright().start()
+        self._playwright = playwright
+        browser = None
+        context = None
+        profile_dir = self._browser_profile
+        if profile_dir is None and self._interactive_login:
+            from .paths import AppPaths
+
+            profile_dir = AppPaths.resolve().user_root / "bc-web-profile"
+        try:
+            if profile_dir is not None:
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                context = launch_persistent_context(
+                    playwright,
+                    self._settings,
+                    user_data_dir=str(profile_dir),
+                    viewport={"width": 1440, "height": 1000},
+                )
+            else:
+                browser = launch_browser(playwright, self._settings)
+                context = browser.new_context(
+                    viewport={"width": 1440, "height": 1000}
+                )
+            self._grant_clipboard_permissions(context)
+            page = context.pages[0] if context.pages else context.new_page()
+            page.set_default_timeout(15_000)
+        except Exception:
+            self._browser = browser
+            self._context = context
+            self.close_session()
+            raise
+        self._browser = browser
+        self._context = context
+        self._page = page
+        return page, context
+
     def run(
         self,
         document: DocumentReference,
         definition: DocumentTypeDefinition | None = None,
         action: ActionDefinition | None = None,
+        *,
+        keep_session: bool = False,
     ) -> PreviewResult:
         if definition is None or action is None:
             definition, action = _legacy_invoice_configuration(document)
@@ -168,30 +239,10 @@ class BusinessCentralWebPreview:
         )
 
         posting_deadline: float | None = None
-        with sync_playwright() as playwright:
-            browser = None
-            profile_dir = self._browser_profile
-            if profile_dir is None and self._interactive_login:
-                from .paths import AppPaths
-
-                profile_dir = AppPaths.resolve().user_root / "bc-web-profile"
-            if profile_dir is not None:
-                profile_dir.mkdir(parents=True, exist_ok=True)
-                context = launch_persistent_context(
-                    playwright,
-                    self._settings,
-                    user_data_dir=str(profile_dir),
-                    viewport={"width": 1440, "height": 1000},
-                )
-            else:
-                browser = launch_browser(playwright, self._settings)
-                context = browser.new_context(
-                    viewport={"width": 1440, "height": 1000}
-                )
+        stage = "navegación inicial"
+        try:
+            page, context = self._acquire_page()
             try:
-                self._grant_clipboard_permissions(context)
-                page = context.pages[0] if context.pages else context.new_page()
-                page.set_default_timeout(15_000)
                 stage = "navegación inicial"
                 page.goto(
                     url,
@@ -303,7 +354,7 @@ class BusinessCentralWebPreview:
                     )
                 else:
                     outcome = wait_result.outcome
-                return PreviewResult(
+                result = PreviewResult(
                     outcome=outcome,
                     title=title,
                     messages=messages,
@@ -332,10 +383,13 @@ class BusinessCentralWebPreview:
                 except Exception:
                     pass
                 raise
-            finally:
-                context.close()
-                if browser is not None:
-                    browser.close()
+            if keep_session and result.outcome == "completed":
+                return result
+            self.close_session()
+            return result
+        except Exception:
+            self.close_session()
+            raise
 
     def _remaining_posting_seconds(
         self,

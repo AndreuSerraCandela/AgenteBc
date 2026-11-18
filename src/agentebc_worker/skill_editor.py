@@ -130,6 +130,12 @@ _EDITOR_PAGE = """
         Validar por OData
       </label>
       <p class="hint">Si está marcado, los campos a modificar se validan con <code>InformesPyTableReader_ValidateChanges</code> antes de abrir la ficha. El registro sigue haciéndose en pantalla. Si no, la validación es la de la ficha, como hasta ahora.</p>
+      <label class="inline">
+        <input type="checkbox" name="keep_web_session" value="yes"
+          {% if form.keep_web_session %}checked{% endif %}>
+        Mantener sesión abierta
+      </label>
+      <p class="hint">Si está marcado, el navegador no se cierra entre facturas que terminan bien: la siguiente se abre en la misma sesión. Si hay error o bloqueo, se cierra y la siguiente empieza de nuevo.</p>
       <label>Rango fecha registro (listado OData)</label>
       <select name="date_dynamic">
         <option value="month_to_today" {% if form.date_dynamic == 'month_to_today' %}selected{% endif %}>Mes en curso hasta hoy</option>
@@ -610,6 +616,7 @@ _DEFAULT_FORM = {
     "posting_date_before_register": "today",
     "before_action_field_edits_lines": "",
     "validate_via_odata": "",
+    "keep_web_session": "",
     "conn_odata_base_url": "",
     "conn_web_base_url": "",
     "conn_company": "",
@@ -930,6 +937,7 @@ def _form_from_skill(skill: WorkerSkill) -> dict[str, object]:
         **_posting_date_form_fields(spec),
         **_after_action_form_fields(spec),
         "validate_via_odata": "yes" if getattr(spec, "validate_via_odata", False) else "",
+        "keep_web_session": "yes" if getattr(spec, "keep_web_session", False) else "",
     }
 
 

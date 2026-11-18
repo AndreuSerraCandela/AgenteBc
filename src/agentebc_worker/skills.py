@@ -376,6 +376,7 @@ def skill_from_builder_form(form: object) -> WorkerSkill:
             for step in before_edits
         ],
         "validate_via_odata": _form_checked(form, "validate_via_odata"),
+        "keep_web_session": _form_checked(form, "keep_web_session"),
     }
     if odata_service:
         spec_payload["odata_service"] = odata_service

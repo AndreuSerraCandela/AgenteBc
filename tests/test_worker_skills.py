@@ -80,6 +80,28 @@ def test_skill_form_report_fields_not_only_contract() -> None:
     assert skill.report_odata_fields().get("number") == "No"
     assert skill.report_odata_fields().get("contract") == "N_x00BA__Contrato"
     assert skill.spec.extra_odata_filters["Esperar_Orden_Cliente"] == "No"
+    assert skill.spec.keep_web_session is False
+
+
+def test_skill_form_keep_web_session() -> None:
+    class Form:
+        def get(self, name, default=""):
+            data = {
+                "label": "Test",
+                "skill_id": "test_keep",
+                "company": "CRONUS",
+                "type_id": "sales_invoice",
+                "action_id": "registrar_factura",
+                "keep_web_session": "yes",
+            }
+            return data.get(name, default)
+
+        def getlist(self, name):
+            return []
+
+    skill = skill_from_builder_form(Form())
+    assert skill.spec.keep_web_session is True
+    assert WorkerJobSpec.from_dict(skill.spec.as_dict()).keep_web_session is True
 
 
 def test_report_odata_fields_omits_after_action_only_columns() -> None:

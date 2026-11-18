@@ -196,6 +196,7 @@ def run_job(
                 )
             )
             if spec.on_error == "stop":
+                _release_web_session(preview_engine)
                 return BatchRunResult(
                     preview_summary=preview.summary,
                     dry_run=False,
@@ -216,7 +217,12 @@ def run_job(
         while attempt < max_attempts and not finished:
             attempt += 1
             try:
-                result = preview_engine.run(document, definition, action)
+                result = preview_engine.run(
+                    document,
+                    definition,
+                    action,
+                    keep_session=spec.keep_web_session,
+                )
                 if result.outcome == "completed" and not result.messages:
                     if odata_posting_check and not _confirm_removed_from_pending_list(
                         client,
@@ -249,12 +255,14 @@ def run_job(
                 )
                 finished = True
                 if spec.on_error == "stop":
+                    _release_web_session(preview_engine)
                     return BatchRunResult(
                         preview_summary=preview.summary,
                         dry_run=False,
                         outcomes=tuple(outcomes),
                     )
             except PreviewActionStalledError as exc:
+                _release_web_session(preview_engine)
                 if _treat_as_posted_success(client, definition, spec, doc.number):
                     logger.info(
                         "Ficha %s: ya no está en el listado OData; "
@@ -291,12 +299,14 @@ def run_job(
                     )
                     finished = True
                     if spec.on_error == "stop":
+                        _release_web_session(preview_engine)
                         return BatchRunResult(
                             preview_summary=preview.summary,
                             dry_run=False,
                             outcomes=tuple(outcomes),
                         )
             except PreviewError as exc:
+                _release_web_session(preview_engine)
                 message = str(exc)
                 if _treat_as_posted_success(client, definition, spec, doc.number):
                     logger.info(
@@ -326,12 +336,14 @@ def run_job(
                 )
                 finished = True
                 if spec.on_error == "stop":
+                    _release_web_session(preview_engine)
                     return BatchRunResult(
                         preview_summary=preview.summary,
                         dry_run=False,
                         outcomes=tuple(outcomes),
                     )
             except (RuntimeError, ValueError, LookupError) as exc:
+                _release_web_session(preview_engine)
                 outcomes.append(
                     DocumentRunOutcome(
                         number=doc.number,
@@ -344,6 +356,7 @@ def run_job(
                 )
                 finished = True
                 if spec.on_error == "stop":
+                    _release_web_session(preview_engine)
                     return BatchRunResult(
                         preview_summary=preview.summary,
                         dry_run=False,
@@ -357,11 +370,18 @@ def run_job(
             spec,
             outcomes,
         )
+    _release_web_session(preview_engine)
     return BatchRunResult(
         preview_summary=preview.summary,
         dry_run=False,
         outcomes=tuple(outcomes),
     )
+
+
+def _release_web_session(preview_engine: object) -> None:
+    closer = getattr(preview_engine, "close_session", None)
+    if callable(closer):
+        closer()
 
 
 def _reconcile_outcomes_with_odata(

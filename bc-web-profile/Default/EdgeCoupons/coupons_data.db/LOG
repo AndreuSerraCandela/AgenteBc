@@ -1,0 +1,5 @@
+2026/11/18-16:02:52.973 1f04 Creating DB C:\Users\Andres\Source\Python\AgenteBc\bc-web-profile\Default\EdgeCoupons/coupons_data.db since it was missing.
+2026/11/18-16:02:53.025 1f04 Reusing MANIFEST C:\Users\Andres\Source\Python\AgenteBc\bc-web-profile\Default\EdgeCoupons/coupons_data.db/MANIFEST-000001
+2026/11/18-16:02:53.171 6dac Level-0 table #5: started
+2026/11/18-16:02:53.176 6dac Level-0 table #5: 683273 bytes OK
+2026/11/18-16:02:53.180 6dac Delete type=0 #3

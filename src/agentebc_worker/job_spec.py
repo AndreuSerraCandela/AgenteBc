@@ -75,6 +75,7 @@ class WorkerJobSpec:
     before_action_field_edits: tuple[FieldEditStep, ...] = ()
     after_action_steps: tuple[AfterActionOdataQueryStep, ...] = ()
     validate_via_odata: bool = False
+    keep_web_session: bool = False
 
     @classmethod
     def from_dict(
@@ -130,6 +131,7 @@ class WorkerJobSpec:
             before_action_field_edits=before_edits,
             after_action_steps=after_action_steps_from_spec_payload(value),
             validate_via_odata=_as_bool(value.get("validate_via_odata", False)),
+            keep_web_session=_as_bool(value.get("keep_web_session", False)),
         )
         return spec
 
