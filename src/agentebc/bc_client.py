@@ -41,22 +41,31 @@ class BusinessCentralReadClient:
             )
             response.raise_for_status()
         except requests.RequestException as exc:
-            status = getattr(exc.response, "status_code", None)
-            detail = f" (HTTP {status})" if status else ""
-            message = f"No se pudo consultar Business Central{detail}"
-            response = exc.response
-            if response is not None:
-                try:
-                    body = response.json()
-                    err = body.get("error") if isinstance(body, dict) else None
-                    if isinstance(err, dict):
-                        bc_msg = str(err.get("message", "")).strip()
-                        if bc_msg:
-                            message = f"{message}: {bc_msg}"
-                except (ValueError, AttributeError):
-                    pass
-            raise BusinessCentralReadError(message) from exc
+            raise BusinessCentralReadError(_request_error_message(exc)) from exc
 
+        try:
+            data = response.json()
+        except requests.JSONDecodeError as exc:
+            raise BusinessCentralReadError(
+                "Business Central no devolvió una respuesta JSON"
+            ) from exc
+        if not isinstance(data, (dict, list)):
+            raise BusinessCentralReadError("La respuesta JSON tiene un formato inesperado")
+        return data
+
+    def post_json(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any] | list[Any]:
+        """POST de solo lectura lógica (p. ej. validar sin Modify). No registra documentos."""
+        url = self._safe_url(endpoint)
+        try:
+            response = self._session.post(
+                url,
+                json=payload,
+                timeout=self._timeout,
+                verify=self._verify,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise BusinessCentralReadError(_request_error_message(exc)) from exc
         try:
             data = response.json()
         except requests.JSONDecodeError as exc:
@@ -75,6 +84,24 @@ class BusinessCentralReadClient:
         if ".." in endpoint.split("/"):
             raise ValueError("El endpoint no puede contener '..'")
         return f"{self._base_url}/{endpoint.lstrip('/')}"
+
+
+def _request_error_message(exc: requests.RequestException) -> str:
+    status = getattr(exc.response, "status_code", None)
+    detail = f" (HTTP {status})" if status else ""
+    message = f"No se pudo consultar Business Central{detail}"
+    response = exc.response
+    if response is not None:
+        try:
+            body = response.json()
+            err = body.get("error") if isinstance(body, dict) else None
+            if isinstance(err, dict):
+                bc_msg = str(err.get("message", "")).strip()
+                if bc_msg:
+                    message = f"{message}: {bc_msg}"
+        except (ValueError, AttributeError):
+            pass
+    return message
 
 
 def _build_auth(settings: Settings):

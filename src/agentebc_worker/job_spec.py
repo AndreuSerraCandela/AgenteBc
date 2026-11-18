@@ -74,6 +74,7 @@ class WorkerJobSpec:
     on_error: str = "report_and_continue"
     before_action_field_edits: tuple[FieldEditStep, ...] = ()
     after_action_steps: tuple[AfterActionOdataQueryStep, ...] = ()
+    validate_via_odata: bool = False
 
     @classmethod
     def from_dict(
@@ -128,6 +129,7 @@ class WorkerJobSpec:
             on_error=on_error,
             before_action_field_edits=before_edits,
             after_action_steps=after_action_steps_from_spec_payload(value),
+            validate_via_odata=_as_bool(value.get("validate_via_odata", False)),
         )
         return spec
 
@@ -341,6 +343,12 @@ def _parse_extra_odata_filters(extra: object) -> dict[str, str | bool]:
             continue
         parsed[key] = str(raw_value).strip()
     return parsed
+
+
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "si", "sí"}
 
 
 def _parse_before_action_field_edits(raw: object) -> tuple[FieldEditStep, ...]:

@@ -124,11 +124,19 @@ _EDITOR_PAGE = """
       <label>Otras ediciones de campo <span class="hint">(opcional; una línea: Etiqueta BC | valor o today/end_of_month)</span></label>
       <textarea name="before_action_field_edits_lines" rows="2" spellcheck="false"
                 placeholder="Fecha registro | today">{{ form.before_action_field_edits_lines }}</textarea>
+      <label class="inline">
+        <input type="checkbox" name="validate_via_odata" value="yes"
+          {% if form.validate_via_odata %}checked{% endif %}>
+        Validar por OData
+      </label>
+      <p class="hint">Si está marcado, los campos a modificar se validan con <code>InformesPyTableReader_ValidateChanges</code> antes de abrir la ficha. El registro sigue haciéndose en pantalla. Si no, la validación es la de la ficha, como hasta ahora.</p>
       <label>Rango fecha registro (listado OData)</label>
       <select name="date_dynamic">
         <option value="month_to_today" {% if form.date_dynamic == 'month_to_today' %}selected{% endif %}>Mes en curso hasta hoy</option>
         <option value="current_month" {% if form.date_dynamic == 'current_month' %}selected{% endif %}>Mes en curso completo (hasta fin de mes)</option>
         <option value="current_year" {% if form.date_dynamic == 'current_year' %}selected{% endif %}>Año en curso</option>
+        <option value="until_today" {% if form.date_dynamic == 'until_today' %}selected{% endif %}>Todas hasta hoy (sin fecha inicial)</option>
+        <option value="until_end_of_month" {% if form.date_dynamic == 'until_end_of_month' %}selected{% endif %}>Todas hasta fin de mes (sin fecha inicial)</option>
       </select>
       <p class="hint">Indique el <strong>servicio OData</strong> (p. ej. FacturaVenta) y pulse cargar. Los desplegables se rellenan desde un documento de ejemplo en BC.</p>
       <button type="button" id="load-odata-fields" style="margin-top:0">Cargar campos OData desde BC</button>
@@ -601,6 +609,7 @@ _DEFAULT_FORM = {
     "limit": "500",
     "posting_date_before_register": "today",
     "before_action_field_edits_lines": "",
+    "validate_via_odata": "",
     "conn_odata_base_url": "",
     "conn_web_base_url": "",
     "conn_company": "",
@@ -920,6 +929,7 @@ def _form_from_skill(skill: WorkerSkill) -> dict[str, object]:
         ) or "",
         **_posting_date_form_fields(spec),
         **_after_action_form_fields(spec),
+        "validate_via_odata": "yes" if getattr(spec, "validate_via_odata", False) else "",
     }
 
 

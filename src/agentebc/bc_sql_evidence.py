@@ -19,6 +19,13 @@ class CustomerRecord:
     blocked: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class ResourceRecord:
+    number: str
+    global_dimension_1: str | None
+    global_dimension_2: str | None
+
+
 class BusinessCentralSqlEvidence:
     def __init__(self, client: SqlReadOnlyClient) -> None:
         self._client = client
@@ -62,6 +69,32 @@ class BusinessCentralSqlEvidence:
             number=str(row.get("number") or customer_no),
             name=_optional_str(row.get("name")),
             blocked=_optional_str(row.get("blocked")),
+        )
+
+    def resource_record(
+        self,
+        company: str,
+        resource_no: str,
+    ) -> ResourceRecord | None:
+        location = self._find_company_table(company, "Resource")
+        if location is None:
+            return None
+        schema, table = location
+        rows = self._client.query(
+            f"SELECT [No_] AS number, "
+            f"[Global Dimension 1 Code] AS dim1, "
+            f"[Global Dimension 2 Code] AS dim2 "
+            f"FROM {schema}.{table} WHERE [No_] = ?",
+            (resource_no,),
+            max_rows=1,
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return ResourceRecord(
+            number=str(row.get("number") or resource_no),
+            global_dimension_1=_optional_str(row.get("dim1")),
+            global_dimension_2=_optional_str(row.get("dim2")),
         )
 
     def _find_company_table(

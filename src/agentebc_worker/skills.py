@@ -128,11 +128,18 @@ class WorkerSkill:
             payload["connection"] = self.connection.as_dict()
         return payload
 
-    def to_job_spec(self, *, dry_run: bool | None = None) -> WorkerJobSpec:
+    def to_job_spec(
+        self,
+        *,
+        dry_run: bool | None = None,
+        company: str | None = None,
+    ) -> WorkerJobSpec:
         data = self.spec.as_dict()
         data["report_odata_fields"] = self.report_odata_fields()
         if dry_run is not None:
             data["dry_run"] = dry_run
+        if company is not None:
+            data["company"] = company.strip()
         return WorkerJobSpec.from_dict(data)
 
     def report_odata_fields(self) -> dict[str, str]:
@@ -368,6 +375,7 @@ def skill_from_builder_form(form: object) -> WorkerSkill:
             {"field_label": step.field_label, "value": step.value}
             for step in before_edits
         ],
+        "validate_via_odata": _form_checked(form, "validate_via_odata"),
     }
     if odata_service:
         spec_payload["odata_service"] = odata_service

@@ -26,6 +26,7 @@ def _settings(**overrides: object) -> Settings:
         source_path=None,
         alpackages_path=None,
         sql_connection_string=None,
+        evidence_backend="auto",
         tls_verify=True,
         request_timeout_seconds=30.0,
         web_action_idle_timeout_seconds=60.0,

@@ -1,6 +1,10 @@
+from pathlib import Path
+
+from agentebc.config import Settings
 from agentebc.evidence_enrichment import (
     BcSourceReference,
     EvidenceItem,
+    enrich_diagnostic_evidence,
     enrich_from_message,
     format_enrichments_for_prompt,
     parse_bc_source_reference,
@@ -128,3 +132,110 @@ def test_source_table_matches_spanish_and_english() -> None:
     assert source_table_matches(ref, "general ledger setup")
     ref_es = BcSourceReference("Configuración contabilidad", None)
     assert source_table_matches(ref_es, "configuración contabilidad")
+
+
+def test_enrich_resource_from_error_description_sql() -> None:
+    message = PreviewMessage(
+        message_type="Error",
+        description=(
+            "Dimensión PROGRAMA en blanco en el recurso nº MP200000130021"
+        ),
+        context=None,
+        context_field=None,
+        source=None,
+        source_field=None,
+        additional_information=None,
+        call_stack=None,
+    )
+    client = FakeSqlClient(
+        "Resource",
+        [{"number": "MP200000130021", "dim1": "EXTERIOR", "dim2": None}],
+    )
+
+    items = enrich_from_message(message, "GREPSA", client)
+
+    assert len(items) == 1
+    assert "MP200000130021" in items[0].title
+    assert ("Global dimension 2", "(vacío)") in items[0].rows
+
+
+def test_resolve_evidence_backend_auto_prefers_sql(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "AGENTEBC_ODATA_BASE_URL=https://bc/ODataV4",
+                "AGENTEBC_AUTH_MODE=windows",
+                "AGENTEBC_SQL_CONNECTION_STRING=DRIVER={x};SERVER=db;",
+                "AGENTEBC_EVIDENCE_BACKEND=auto",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENTEBC_ENV_FILE", str(tmp_path / ".env"))
+    settings = Settings.from_environment()
+    assert settings.resolve_evidence_backend() == "sql"
+
+
+def test_enrich_diagnostic_evidence_odata_mode_without_sql(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FakeODataEvidence:
+        def customer_record(self, company: str, customer_no: str):
+            from agentebc.bc_sql_evidence import CustomerRecord
+
+            return CustomerRecord(customer_no, "ACME", "")
+
+    message = PreviewMessage(
+        message_type="Error",
+        description="Cliente bloqueado",
+        context=None,
+        context_field=None,
+        source="Customer: 43P000005",
+        source_field=None,
+        additional_information=None,
+        call_stack=None,
+    )
+    (tmp_path / ".env").write_text(
+        "\n".join(
+            [
+                "AGENTEBC_ODATA_BASE_URL=https://bc/ODataV4",
+                "AGENTEBC_AUTH_MODE=windows",
+                "AGENTEBC_EVIDENCE_BACKEND=odata",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("AGENTEBC_ENV_FILE", str(tmp_path / ".env"))
+    for name in (
+        "AGENTEBC_SQL_CONNECTION_STRING",
+        "AGENTEBC_SQL_ENV_FILE",
+        "SQL_SERVER",
+        "SQL_DATABASE",
+        "SQL_USER",
+        "SQL_PASSWORD",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    settings = Settings.load_fresh(tmp_path / ".env")
+    assert settings.resolve_evidence_backend() == "odata"
+
+    import agentebc.evidence_enrichment as module
+
+    original = module.BusinessCentralODataEvidence
+    module.BusinessCentralODataEvidence = lambda _client: FakeODataEvidence()
+    try:
+        items = enrich_diagnostic_evidence(
+            message,
+            company="EMPRESA",
+            settings=settings,
+        )
+    finally:
+        module.BusinessCentralODataEvidence = original
+
+    assert len(items) == 1
+    assert items[0].title == "Cliente 43P000005 (OData)"

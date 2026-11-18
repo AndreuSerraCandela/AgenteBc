@@ -4,19 +4,20 @@ from __future__ import annotations
 import json
 from typing import Callable
 
-from flask import Flask, render_template_string, request
+from flask import Flask, redirect, render_template_string, request
 
 from agentebc.bc_client import BusinessCentralReadClient
 from agentebc.config import Settings
 from agentebc.document_types import DocumentTypeRegistry
+from agentebc.documents import DocumentReader
 
 from .field_edits import (
     DEFAULT_POSTING_DATE_FIELD_LABEL,
     describe_before_action_edits,
     spec_with_posting_date_mode,
 )
-from .job_spec import WorkerJobSpec
-from .paths import WorkerPaths
+from .mail_settings import mail_form_from_env, save_worker_mail_settings
+from .mailer import SmtpSettings
 from .pending import write_pending_preview
 from .preview import build_job_preview
 from .runner import run_job
@@ -66,11 +67,18 @@ _PORTAL_PAGE = """
     {% if share_configured %}
       · <a href="/skills/inbox">Skills ({{ inbox_count }})</a>
     {% endif %}
+    · <a href="/portal/settings">Configuración</a>
     · <a href="/">Modo consultor</a>
   </nav>
   <h1>Registro en Business Central</h1>
   <p class="lead">Elija el trabajo y pulse Ejecutar. Se registrarán las facturas del criterio del skill.</p>
   {% if saved_message %}<div class="saved-banner">{{ saved_message }}</div>{% endif %}
+  {% if not smtp_ready %}
+  <div class="skills-banner">
+    El correo del informe no está configurado en este equipo.
+    <a href="/portal/settings">Abrir configuración</a>
+  </div>
+  {% endif %}
   {% if share_configured and inbox_count %}
   <div class="skills-banner">
     Hay {{ inbox_count }} skill(s) del consultor pendientes de descargar.
@@ -92,7 +100,18 @@ _PORTAL_PAGE = """
     <label id="company-label">Empresa
       <span class="hint" id="company-hint"></span>
     </label>
+    {% if companies %}
+    <select id="company_select">
+      <option value="">— Seleccione —</option>
+      {% for name in companies %}
+      <option value="{{ name }}" {% if form.company == name %}selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+    <input type="hidden" name="company" id="company" value="{{ form.company }}">
+    {% else %}
     <input name="company" id="company" value="{{ form.company }}" placeholder="Nombre en BC">
+    <p class="hint">No se pudo leer la lista de empresas de BC.</p>
+    {% endif %}
 
     <label id="posting-label">{{ posting_field_label }}
       <span class="hint">(en la ficha BC, antes de registrar)</span>
@@ -117,7 +136,8 @@ _PORTAL_PAGE = """
   {% endif %}
 
   <footer>
-    <a href="/skills">Editor de skills</a>
+    <a href="/portal/settings">Configuración</a>
+    · <a href="/skills">Editor de skills</a>
     {% if share_configured %}
       · <a href="/skills/inbox">Skills ({{ inbox_count }})</a>
     {% endif %}
@@ -125,18 +145,34 @@ _PORTAL_PAGE = """
   <script>
     const sel = document.getElementById('skill_id');
     const company = document.getElementById('company');
+    const companySelect = document.getElementById('company_select');
     const hint = document.getElementById('company-hint');
     function syncCompany() {
       const opt = sel.options[sel.selectedIndex];
       const c = opt ? (opt.getAttribute('data-company') || '') : '';
       if (c) {
         company.value = c;
-        company.readOnly = true;
+        if (companySelect) {
+          companySelect.value = c;
+          companySelect.disabled = true;
+        } else {
+          company.readOnly = true;
+        }
         hint.textContent = '(definida en el skill)';
       } else {
-        company.readOnly = false;
+        if (companySelect) {
+          companySelect.disabled = false;
+          company.value = companySelect.value;
+        } else {
+          company.readOnly = false;
+        }
         hint.textContent = '(obligatoria si el skill no la trae)';
       }
+    }
+    if (companySelect) {
+      companySelect.addEventListener('change', function () {
+        if (!companySelect.disabled) company.value = companySelect.value;
+      });
     }
     sel.addEventListener('change', syncCompany);
     syncCompany();
@@ -173,6 +209,7 @@ def register_simple_portal_routes(
             inbox_count=_inbox_count(inbox_count_fn),
             share_configured=share_portal_configured(),
             saved_message=saved_message,
+            companies=_company_names(),
         )
 
     @app.post("/portal/run")
@@ -198,9 +235,7 @@ def register_simple_portal_routes(
                     "Indique la empresa BC. El skill no la define en spec ni en connection."
                 )
             settings = settings_for_skill(Settings.from_environment(), skill)
-            spec = WorkerJobSpec.from_dict(
-                {**skill.to_job_spec(dry_run=False).as_dict(), "company": company}
-            )
+            spec = skill.to_job_spec(dry_run=False, company=company)
             apply_mode = posting_mode if posting_mode != "skill" else ""
             spec = spec_with_posting_date_mode(spec, apply_mode)
             reg = registry()
@@ -252,7 +287,43 @@ def register_simple_portal_routes(
             posting_field_label=posting_label if skill_id else DEFAULT_POSTING_DATE_FIELD_LABEL,
             share_configured=share_portal_configured(),
             saved_message=None,
+            companies=_company_names(),
         )
+
+    @app.get("/portal/settings")
+    def portal_settings():
+        saved = request.args.get("saved") == "1"
+        return _render_mail_settings(
+            mail_form_from_env(worker_paths.app.env_file),
+            error=None,
+            saved=saved,
+        )
+
+    @app.post("/portal/settings")
+    def portal_settings_save():
+        form = {
+            "host": request.form.get("host", ""),
+            "port": request.form.get("port", ""),
+            "user": request.form.get("user", ""),
+            "sender": request.form.get("sender", ""),
+            "security": request.form.get("security", "tls"),
+            "password": request.form.get("password", ""),
+        }
+        try:
+            save_worker_mail_settings(worker_paths.app.env_file, form)
+        except ValueError as exc:
+            shown = mail_form_from_env(worker_paths.app.env_file)
+            shown.update(
+                {
+                    "host": form["host"].strip(),
+                    "port": form["port"].strip(),
+                    "user": form["user"].strip(),
+                    "sender": form["sender"].strip(),
+                    "security": form["security"],
+                }
+            )
+            return _render_mail_settings(shown, error=str(exc), saved=False)
+        return redirect("/portal/settings?saved=1")
 
 
 def _render_portal(
@@ -266,6 +337,7 @@ def _render_portal(
     share_configured: bool,
     saved_message: str | None,
     posting_field_label: str = DEFAULT_POSTING_DATE_FIELD_LABEL,
+    companies: tuple[str, ...] = (),
 ):
     skills_view = []
     for skill in store.all():
@@ -284,6 +356,71 @@ def _render_portal(
         share_configured=share_configured,
         saved_message=saved_message,
         posting_field_label=posting_field_label,
+        smtp_ready=SmtpSettings.from_environment() is not None,
+        companies=_companies_for_form(companies, form.get("company", "")),
+    )
+
+
+_MAIL_PAGE = """
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>AgenteBc · Configuración</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; max-width: 520px; margin: 48px auto; padding: 0 20px; }
+    h1 { font-size: 1.5rem; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    select, input { width: 100%; padding: 10px; box-sizing: border-box; font-size: 1rem; }
+    button { margin-top: 24px; width: 100%; padding: 14px; font-size: 1.05rem;
+             background: #0067b8; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+    .error { color: #a80000; margin-top: 16px; }
+    .saved-banner { background: #dff6dd; border-left: 4px solid #107c10; padding: 10px 12px; margin: 16px 0; }
+    .hint { font-size: 13px; color: #555; font-weight: normal; }
+    nav.top { margin-bottom: 20px; font-size: 15px; }
+    nav.top a { color: #0067b8; text-decoration: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <nav class="top">
+    <a href="/portal">Registro</a>
+    · <a href="/portal/settings">Configuración</a>
+  </nav>
+  <h1>Correo del informe</h1>
+  <p class="hint">Cada equipo guarda su propio servidor y remitente. El informe se envía también cuando hay facturas con error.</p>
+  {% if saved %}<div class="saved-banner">Configuración guardada en este usuario.</div>{% endif %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/portal/settings">
+    <label>Servidor SMTP</label>
+    <input name="host" value="{{ form.host }}" placeholder="smtp.ejemplo.com" required>
+    <label>Puerto</label>
+    <input name="port" value="{{ form.port }}" required>
+    <label>Seguridad</label>
+    <select name="security">
+      <option value="tls" {% if form.security != 'ssl' %}selected{% endif %}>STARTTLS (normalmente 587)</option>
+      <option value="ssl" {% if form.security == 'ssl' %}selected{% endif %}>SSL (normalmente 465)</option>
+    </select>
+    <label>Usuario</label>
+    <input name="user" value="{{ form.user }}" autocomplete="username">
+    <label>Contraseña
+      <span class="hint">{% if form.password_set %}Dejar vacío para no cambiar{% endif %}</span>
+    </label>
+    <input name="password" type="password" value="" autocomplete="current-password">
+    <label>Remitente</label>
+    <input name="sender" value="{{ form.sender }}" placeholder="informes@empresa.com" required>
+    <button type="submit">Guardar</button>
+  </form>
+</body>
+</html>
+"""
+
+
+def _render_mail_settings(form: dict[str, str], *, error: str | None, saved: bool):
+    return render_template_string(
+        _MAIL_PAGE,
+        form=form,
+        error=error,
+        saved=saved,
     )
 
 
@@ -301,6 +438,24 @@ def _run_line(result) -> str:
         err = sum(1 for o in result.outcomes if o.outcome == "error")
         return f"Listo: {ok} registradas, {err} con error"
     return "Ejecución completada"
+
+
+def _company_names() -> tuple[str, ...]:
+    try:
+        settings = Settings.from_environment()
+        if not settings.odata_base_url:
+            return ()
+        return tuple(DocumentReader(BusinessCentralReadClient(settings)).list_companies())
+    except Exception:
+        return ()
+
+
+def _companies_for_form(companies: tuple[str, ...], selected: str) -> tuple[str, ...]:
+    names = list(companies)
+    chosen = selected.strip()
+    if chosen and chosen not in names:
+        names.insert(0, chosen)
+    return tuple(names)
 
 
 def _inbox_count(fn: Callable[[], int] | None) -> int:

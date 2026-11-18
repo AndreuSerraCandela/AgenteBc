@@ -127,6 +127,8 @@ _PAGE = """
         <option value="month_to_today">Mes en curso hasta hoy</option>
         <option value="current_month">Mes en curso (fin de mes)</option>
         <option value="current_year">Año en curso</option>
+        <option value="until_today">Todas hasta hoy (sin fecha inicial)</option>
+        <option value="until_end_of_month">Todas hasta fin de mes (sin fecha inicial)</option>
       </select>
       <label class="inline"><input type="checkbox" name="dry_run" value="yes" checked> Solo simulación (dry run)</label>
       <button type="submit">Generar preview</button>
@@ -308,9 +310,7 @@ def create_app() -> Flask:
                 raise ValueError(
                     "Indique empresa (el skill no la define en spec ni connection)."
                 )
-            spec = WorkerJobSpec.from_dict(
-                {**skill.to_job_spec(dry_run=dry).as_dict(), "company": company}
-            )
+            spec = skill.to_job_spec(dry_run=dry, company=company)
             posting_mode = request.form.get("posting_date_before_register", "").strip()
             if posting_mode:
                 spec = spec_with_posting_date_mode(spec, posting_mode)
@@ -494,6 +494,8 @@ def create_app() -> Flask:
                     "month_to_today",
                     "current_month",
                     "current_year",
+                    "until_today",
+                    "until_end_of_month",
                 ],
             }
         )

@@ -24,6 +24,18 @@ def test_month_to_today_filter() -> None:
     assert resolved.date_to == date(2026, 9, 28)
 
 
+def test_until_today_filter_has_no_start_date() -> None:
+    resolved = resolve_dynamic_filter("until_today", reference=date(2026, 9, 28))
+    assert resolved.date_from == date(1900, 1, 1)
+    assert resolved.date_to == date(2026, 9, 28)
+
+
+def test_until_end_of_month_filter_has_no_start_date() -> None:
+    resolved = resolve_dynamic_filter("until_end_of_month", reference=date(2026, 9, 28))
+    assert resolved.date_from == date(1900, 1, 1)
+    assert resolved.date_to == date(2026, 9, 30)
+
+
 def test_odata_equals_boolean() -> None:
     assert _odata_equals("esperarOrdenCliente", False) == "esperarOrdenCliente eq false"
 

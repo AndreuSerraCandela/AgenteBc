@@ -39,6 +39,13 @@ def test_resolve_skill_company_override() -> None:
     assert resolve_skill_company(skill, override="B") == "B"
 
 
+def test_to_job_spec_uses_form_company_when_skill_has_none() -> None:
+    skill = _skill(company="")
+    spec = skill.to_job_spec(dry_run=False, company="Malla Publicidad")
+    assert spec.company == "Malla Publicidad"
+    assert spec.dry_run is False
+
+
 def test_portal_posting_date_mode_today() -> None:
     skill = _skill(company="A")
     spec = spec_with_posting_date_mode(skill.to_job_spec(dry_run=True), "today")
@@ -82,6 +89,7 @@ def test_settings_for_skill_overlays_urls() -> None:
         source_path=None,
         alpackages_path=None,
         sql_connection_string=None,
+        evidence_backend="auto",
         tls_verify=True,
         request_timeout_seconds=30.0,
         web_action_idle_timeout_seconds=60.0,

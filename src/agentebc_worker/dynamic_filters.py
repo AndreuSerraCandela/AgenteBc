@@ -6,10 +6,25 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
-DynamicFilterId = Literal["current_month", "current_year", "month_to_today"]
+DynamicFilterId = Literal[
+    "current_month",
+    "current_year",
+    "month_to_today",
+    "until_today",
+    "until_end_of_month",
+]
+
+# Sin fecha de inicio: se usa como límite inferior muy antiguo en OData (ge).
+OPEN_START_DATE = date(1900, 1, 1)
 
 DYNAMIC_FILTER_IDS: frozenset[str] = frozenset(
-    {"current_month", "current_year", "month_to_today"}
+    {
+        "current_month",
+        "current_year",
+        "month_to_today",
+        "until_today",
+        "until_end_of_month",
+    }
 )
 
 
@@ -56,8 +71,19 @@ def _month_to_today(ref: date) -> tuple[date, date]:
     return start, ref
 
 
+def _until_today(ref: date) -> tuple[date, date]:
+    return OPEN_START_DATE, ref
+
+
+def _until_end_of_month(ref: date) -> tuple[date, date]:
+    _, end = _current_month(ref)
+    return OPEN_START_DATE, end
+
+
 _RESOLVERS: dict[str, Callable[[date], tuple[date, date]]] = {
     "current_month": _current_month,
     "current_year": _current_year,
     "month_to_today": _month_to_today,
+    "until_today": _until_today,
+    "until_end_of_month": _until_end_of_month,
 }

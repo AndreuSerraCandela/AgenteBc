@@ -7,6 +7,7 @@ from agentebc.config import Settings
 from agentebc.diagnosis import build_diagnostic_service
 from agentebc.documents import DocumentReference
 from agentebc.license_catalog import ExtensionCatalog
+from agentebc.evidence_enrichment import enrich_diagnostic_evidence
 from agentebc.llm_conclusions import build_conclusion_prompt
 from agentebc.models import DiagnosticReport, Incident
 from agentebc.web_preview import PreviewMessage, primary_preview_message
@@ -52,6 +53,7 @@ def add_per_invoice_ai_conclusions(
         try:
             text = _conclude_single_row(
                 client,
+                settings=settings,
                 diagnostic_service=diagnostic_service,
                 skill=skill,
                 case_label=case_label,
@@ -73,6 +75,7 @@ def add_per_invoice_ai_conclusions(
 def _conclude_single_row(
     client,
     *,
+    settings: Settings,
     diagnostic_service,
     skill: WorkerSkill,
     case_label: str,
@@ -113,12 +116,17 @@ def _conclude_single_row(
     except Exception:
         diagnosis = _fallback_diagnosis(incident)
 
+    enrichments = enrich_diagnostic_evidence(
+        message,
+        company=company,
+        settings=settings,
+    )
     user_prompt = build_conclusion_prompt(
         case_label=f"{case_label} — {number}",
         document=document,
         message=message,
         diagnosis=diagnosis,
-        enrichments=(),
+        enrichments=enrichments,
     )
     extra_block = format_error_detail_text(detail)
     if extra_block:

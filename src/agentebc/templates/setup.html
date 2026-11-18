@@ -113,6 +113,15 @@
             <label for="AGENTEBC_SQL_ENV_FILE">Fichero SQL opcional</label>
             <input id="AGENTEBC_SQL_ENV_FILE" name="AGENTEBC_SQL_ENV_FILE" value="{{ values.AGENTEBC_SQL_ENV_FILE or '' }}" placeholder="C:\ruta\db.local.env">
           </div>
+          <div>
+            <label for="AGENTEBC_EVIDENCE_BACKEND">Evidencia para diagnóstico</label>
+            <select id="AGENTEBC_EVIDENCE_BACKEND" name="AGENTEBC_EVIDENCE_BACKEND">
+              <option value="auto" {% if (values.AGENTEBC_EVIDENCE_BACKEND or 'auto') == 'auto' %}selected{% endif %}>Automático (SQL si hay fichero SQL; si no OData)</option>
+              <option value="sql" {% if values.AGENTEBC_EVIDENCE_BACKEND == 'sql' %}selected{% endif %}>SQL (rápido, on-prem)</option>
+              <option value="odata" {% if values.AGENTEBC_EVIDENCE_BACKEND == 'odata' %}selected{% endif %}>OData (más portable)</option>
+            </select>
+            <p class="hint">Datos extra para conclusiones IA tras un error de registro (cliente, recurso, fechas contables).</p>
+          </div>
         </div>
       </section>
 

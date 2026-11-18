@@ -12,6 +12,7 @@ src/agentebc/action_share_client.py
 src/agentebc/ai_web_cdp.py
 src/agentebc/bc_agent_source.py
 src/agentebc/bc_client.py
+src/agentebc/bc_odata_evidence.py
 src/agentebc/bc_sql_evidence.py
 src/agentebc/browser.py
 src/agentebc/call_stack.py
@@ -54,10 +55,12 @@ src/agentebc_worker/error_reporting.py
 src/agentebc_worker/field_edits.py
 src/agentebc_worker/job_spec.py
 src/agentebc_worker/list_documents.py
+src/agentebc_worker/mail_settings.py
 src/agentebc_worker/mailer.py
 src/agentebc_worker/natural_language.py
 src/agentebc_worker/odata_fields.py
 src/agentebc_worker/odata_posting.py
+src/agentebc_worker/odata_validate.py
 src/agentebc_worker/paths.py
 src/agentebc_worker/pending.py
 src/agentebc_worker/presets.py
@@ -97,6 +100,7 @@ tests/test_mailer.py
 tests/test_microsoft_packages.py
 tests/test_odata_fields.py
 tests/test_odata_posting.py
+tests/test_odata_validate.py
 tests/test_paths.py
 tests/test_portal.py
 tests/test_runner_stall.py
@@ -114,5 +118,6 @@ tests/test_worker_ai.py
 tests/test_worker_batch_report.py
 tests/test_worker_error_reporting.py
 tests/test_worker_field_edits.py
+tests/test_worker_mail_settings.py
 tests/test_worker_simple_portal.py
 tests/test_worker_skills.py

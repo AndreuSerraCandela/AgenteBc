@@ -35,6 +35,7 @@ class Settings:
     source_path: Path | None
     alpackages_path: Path | None
     sql_connection_string: str | None
+    evidence_backend: str
     tls_verify: bool
     request_timeout_seconds: float
     web_action_idle_timeout_seconds: float
@@ -179,6 +180,9 @@ class Settings:
                 _optional("AGENTEBC_SQL_CONNECTION_STRING", strip=False)
                 or _legacy_sql_connection_string()
             ),
+            evidence_backend=(
+                _optional("AGENTEBC_EVIDENCE_BACKEND") or "auto"
+            ).lower(),
             tls_verify=_boolean(
                 os.getenv("AGENTEBC_TLS_VERIFY", "true"),
                 name="AGENTEBC_TLS_VERIFY",
@@ -310,6 +314,22 @@ class Settings:
                 "AGENTEBC_AI_PROVIDER debe ser lm_studio, deepseek, "
                 "deepseek_web o google_ai_web"
             )
+        if self.evidence_backend not in {"auto", "sql", "odata"}:
+            raise ConfigurationError(
+                "AGENTEBC_EVIDENCE_BACKEND debe ser auto, sql u odata"
+            )
+
+    def resolve_evidence_backend(self) -> str | None:
+        """Backend efectivo para enriquecer diagnóstico (solo lectura)."""
+        if self.evidence_backend == "sql":
+            return "sql" if self.sql_connection_string else None
+        if self.evidence_backend == "odata":
+            return "odata" if self.odata_base_url else None
+        if self.sql_connection_string:
+            return "sql"
+        if self.odata_base_url:
+            return "odata"
+        return None
 
     def safe_summary(self) -> dict[str, object]:
         return {
@@ -332,6 +352,8 @@ class Settings:
                 str(self.alpackages_path) if self.alpackages_path else None
             ),
             "sql_configured": bool(self.sql_connection_string),
+            "evidence_backend": self.evidence_backend,
+            "evidence_backend_resolved": self.resolve_evidence_backend(),
             "tls_verify": self.tls_verify,
             "request_timeout_seconds": self.request_timeout_seconds,
             "web_action_idle_timeout_seconds": (

@@ -7,7 +7,7 @@ from typing import Any
 from agentebc.bc_client import BusinessCentralReadClient, BusinessCentralReadError
 from agentebc.document_types import DocumentTypeDefinition, DocumentTypeRegistry
 
-from .dynamic_filters import resolve_dynamic_filter
+from .dynamic_filters import OPEN_START_DATE, resolve_dynamic_filter
 from .job_spec import (
     WorkerJobSpec,
     resolve_date_filter,
@@ -16,6 +16,15 @@ from .job_spec import (
     uses_custom_odata_service,
 )
 from .list_documents import list_documents_for_job
+
+
+def _range_text(resolved_dates: dict[str, str | None]) -> str:
+    """Texto legible del rango; sin fecha inicial se muestra «inicio»."""
+    start = resolved_dates.get("from")
+    end = resolved_dates.get("to")
+    if start == OPEN_START_DATE.isoformat():
+        start = "inicio"
+    return f"{start} … {end}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,16 +155,16 @@ def _format_summary(
     ])
     if resolved_dates:
         dynamic = resolved_dates.get("dynamic")
+        range_text = _range_text(resolved_dates)
         if dynamic:
             lines.append(
                 f"Fechas ({spec.date_filter.field if spec.date_filter else '?'}): "
-                f"filtro dinámico «{dynamic}» → "
-                f"{resolved_dates['from']} … {resolved_dates['to']}"
+                f"filtro dinámico «{dynamic}» → {range_text}"
             )
         else:
             lines.append(
                 f"Fechas ({spec.date_filter.field if spec.date_filter else '?'}): "
-                f"{resolved_dates['from']} … {resolved_dates['to']}"
+                f"{range_text}"
             )
     if odata_error:
         lines.append(f"Listado OData: no disponible ({odata_error})")

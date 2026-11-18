@@ -42,12 +42,11 @@ from .document_types import (
     parse_dialog_steps_text,
 )
 from .documents import DocumentNotFoundError, DocumentReference, DocumentReader
-from .evidence_enrichment import EvidenceItem, enrich_from_message
+from .evidence_enrichment import EvidenceItem, enrich_diagnostic_evidence
 from .deepseek_web import DeepSeekWebError
 from .google_ai_web import GoogleAiWebError
 from .llm_conclusions import _WEB_AI_PROVIDERS, build_llm_client, request_ai_conclusion
 from .models import DiagnosticReport, Evidence, Incident, ProposedSolution, SourceMatch
-from .sql_reader import SqlReadOnlyClient
 from .web_preview import (
     BusinessCentralActionExplorer,
     BusinessCentralWebPreview,
@@ -305,17 +304,10 @@ def create_app(
                         },
                     )
                 )
-                sql_client = (
-                    SqlReadOnlyClient(
-                        current_settings().sql_connection_string
-                    )
-                    if current_settings().sql_connection_string
-                    else None
-                )
-                enrichment_items = enrich_from_message(
+                enrichment_items = enrich_diagnostic_evidence(
                     primary_message,
-                    document.company,
-                    sql_client,
+                    company=document.company,
+                    settings=current_settings(),
                 )
                 if enrichment_items:
                     enrichments = [

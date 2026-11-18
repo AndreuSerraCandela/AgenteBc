@@ -2,6 +2,15 @@ from agentebc_worker.mailer import SmtpSettings
 
 
 def test_smtp_from_mail_server_env(monkeypatch) -> None:
+    for name in (
+        "AGENTEBC_SMTP_HOST",
+        "AGENTEBC_SMTP_PORT",
+        "AGENTEBC_SMTP_USER",
+        "AGENTEBC_SMTP_PASSWORD",
+        "AGENTEBC_SMTP_FROM",
+        "AGENTEBC_SMTP_TLS",
+    ):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("AGENTEBC_SMTP_HOST", raising=False)
     monkeypatch.setenv("MAIL_SERVER", "smtp.example.test")
     monkeypatch.setenv("MAIL_PORT", "465")

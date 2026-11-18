@@ -27,6 +27,7 @@ from .odata_posting import (
     registration_check_for_posting_job,
 )
 from .field_edits import materialize_action_for_job
+from .odata_validate import validation_errors_for_job
 from .preview import build_job_preview
 
 logger = logging.getLogger(__name__)
@@ -153,6 +154,12 @@ def run_job(
     custom_odata = uses_custom_odata_service(spec, definition)
     odata_posting_check = posting_action_requires_odata_check(spec, definition)
     max_attempts = max(1, settings.web_action_max_attempts)
+    odata_field_errors = validation_errors_for_job(
+        client,
+        definition,
+        spec,
+        listing.documents,
+    )
 
     for doc in listing.documents:
         extra = listing_fields.get(doc.number, {})
@@ -177,6 +184,23 @@ def run_job(
                     fields=extra,
                 )
             )
+            continue
+        field_error = odata_field_errors.get(doc.number)
+        if field_error:
+            outcomes.append(
+                DocumentRunOutcome(
+                    number=doc.number,
+                    outcome="error",
+                    error=field_error,
+                    fields=extra,
+                )
+            )
+            if spec.on_error == "stop":
+                return BatchRunResult(
+                    preview_summary=preview.summary,
+                    dry_run=False,
+                    outcomes=tuple(outcomes),
+                )
             continue
         if custom_odata:
             document = doc

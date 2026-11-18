@@ -34,6 +34,8 @@ def test_loads_project_and_referenced_sql_env(
         "AGENTEBC_ODATA_BASE_URL",
         "AGENTEBC_AUTH_MODE",
         "AGENTEBC_SQL_ENV_FILE",
+        "AGENTEBC_SQL_CONNECTION_STRING",
+        "AGENTEBC_EVIDENCE_BACKEND",
         "AGENTEBC_COMPANY",
         "AGENTEBC_USERNAME",
         "AGENTEBC_PASSWORD",
